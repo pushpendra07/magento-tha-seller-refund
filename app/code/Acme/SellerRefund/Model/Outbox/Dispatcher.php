@@ -58,10 +58,10 @@ class Dispatcher
                     $this->processor->process($refundId, $nextAttempt);
                     break;
                 case Outbox::OP_STATUS_CHECK:
-                    $this->processor->checkStatus($refundId);
+                    $this->processor->checkStatus($refundId, $nextAttempt);
                     break;
                 case Outbox::OP_CONFIRM:
-                    $this->processor->confirm($refundId);
+                    $this->processor->confirm($refundId, $nextAttempt);
                     break;
                 default:
                     throw new \InvalidArgumentException(sprintf('Unknown outbox operation "%s".', $op));

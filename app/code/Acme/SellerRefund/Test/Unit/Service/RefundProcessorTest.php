@@ -200,5 +200,31 @@ class RefundProcessorTest extends TestCase
         $this->processor->process(7);
     }
 
+    /**
+     * The audit trail records which retry of Confirm this was (FRD 12.2 attempt history).
+     */
+    public function testConfirmRecordsTheOutboxAttemptNumber(): void
+    {
+        $refund = $this->createMock(RefundInterface::class);
+        $refund->method('getStatus')->willReturn(RefundInterface::STATUS_ERP_CONFIRM_PENDING);
+        $refund->method('getErpRefundId')->willReturn('ERP-8000123');
 
+        $this->refundRepository->method('getById')->with(7)->willReturn($refund);
+        $this->payloadBuilder->method('buildConfirm')->willReturn([]);
+        $this->client->method('confirm')->willThrowException(
+            new ErpTransientException('The ERP returned a transient error (HTTP 503).', 503)
+        );
+
+        $this->eventRecorder->expects(self::once())
+            ->method('record')
+            ->with(
+                7,
+                self::anything(),
+                RefundInterface::SUB_RETRYABLE_ERROR,
+                self::callback(static fn (array $ctx): bool => ($ctx['attempt_no'] ?? null) === 3)
+            );
+
+        $this->expectException(ErpTransientException::class);
+        $this->processor->confirm(7, 3);
+    }
 }

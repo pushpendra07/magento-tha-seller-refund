@@ -213,7 +213,7 @@ class RefundProcessor
         $this->outbox->enqueue($refundId, Outbox::OP_STATUS_CHECK);
     }
 
-    public function checkStatus(int $refundId): void
+    public function checkStatus(int $refundId, int $attemptNo = 1): void
     {
         $refund = $this->refundRepository->getById($refundId);
         if ($refund->getStatus() !== RefundInterface::STATUS_CASH_REFUNDED) {
@@ -229,6 +229,7 @@ class RefundProcessor
             $this->stateMachine->setSubStatus($refund, RefundInterface::STATUS_CHECK_STATUS, RefundInterface::SUB_RETRYABLE_ERROR);
             $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_STATUS, RefundInterface::SUB_RETRYABLE_ERROR, [
                 'api_code' => 'status',
+                'attempt_no' => $attemptNo,
                 'error_code' => (string) $e->getHttpCode(),
             ]);
             throw $e;
@@ -236,6 +237,7 @@ class RefundProcessor
 
         $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_STATUS, RefundInterface::SUB_SUCCEEDED, [
             'api_code' => 'status',
+            'attempt_no' => $attemptNo,
             'response_payload' => $response,
         ]);
         $this->stateMachine->transition(
@@ -247,7 +249,7 @@ class RefundProcessor
         $this->outbox->enqueue($refundId, Outbox::OP_CONFIRM);
     }
 
-    public function confirm(int $refundId): void
+    public function confirm(int $refundId, int $attemptNo = 1): void
     {
         $refund = $this->refundRepository->getById($refundId);
         if ($refund->getStatus() !== RefundInterface::STATUS_ERP_CONFIRM_PENDING) {
@@ -264,6 +266,7 @@ class RefundProcessor
             $this->stateMachine->setSubStatus($refund, RefundInterface::CONFIRM_STATUS, RefundInterface::SUB_RETRYABLE_ERROR);
             $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_CONFIRM, RefundInterface::SUB_RETRYABLE_ERROR, [
                 'api_code' => 'confirm',
+                'attempt_no' => $attemptNo,
                 'error_code' => (string) $e->getHttpCode(),
             ]);
             throw $e;
@@ -271,6 +274,7 @@ class RefundProcessor
 
         $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_CONFIRM, RefundInterface::SUB_SUCCEEDED, [
             'api_code' => 'confirm',
+            'attempt_no' => $attemptNo,
             'response_payload' => $response,
         ]);
         $this->stateMachine->transition(
