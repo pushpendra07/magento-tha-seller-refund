@@ -8,6 +8,7 @@ use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\RefundRepositoryInterface;
 use Acme\SellerRefund\Model\Erp\CreateResult;
 use Acme\SellerRefund\Model\Erp\ErpRefundClient;
+use Acme\SellerRefund\Model\Erp\Exception\ErpConflictException;
 use Acme\SellerRefund\Model\Erp\Exception\ErpTransientException;
 use Acme\SellerRefund\Model\Erp\PayloadBuilder;
 use Acme\SellerRefund\Model\Event\EventRecorder;
@@ -167,4 +168,37 @@ class RefundProcessorTest extends TestCase
         $this->expectException(ErpTransientException::class);
         $this->processor->process(7);
     }
+
+    /**
+     * HTTP 409 means the ERP already holds a credit note for this refund_no. The refund must
+     * stay at calculated (still counting its quantity) instead of moving to failed, which would
+     * release the quantity for a second refund.
+     */
+    public function testProcessConflictHoldsTheRefundForReconciliation(): void
+    {
+        $refund = $this->createMock(RefundInterface::class);
+        $refund->method('getStatus')->willReturn(RefundInterface::STATUS_CALCULATED);
+        $refund->method('getRefundNo')->willReturn('SR-20260907-000123');
+        $refund->method('getOrderId')->willReturn(100);
+
+        $this->refundRepository->method('getById')->with(7)->willReturn($refund);
+        $this->refundRepository->method('getItems')->with(7)->willReturn([]);
+        $this->orderRepository->method('get')->with(100)->willReturn(
+            $this->createMock(\Magento\Sales\Api\Data\OrderInterface::class)
+        );
+        $this->client->method('hasSucceededCreate')->willReturn(false);
+        $this->payloadBuilder->method('build')->willReturn(['refund_no' => 'SR-20260907-000123']);
+        $this->client->method('create')->willThrowException(
+            new ErpConflictException('The ERP reported a conflict (HTTP 409).')
+        );
+
+        $this->stateMachine->expects(self::once())
+            ->method('setSubStatus')
+            ->with($refund, RefundInterface::CREATE_STATUS, RefundInterface::SUB_CONFLICT);
+        $this->stateMachine->expects(self::never())->method('transition');
+
+        $this->processor->process(7);
+    }
+
+
 }

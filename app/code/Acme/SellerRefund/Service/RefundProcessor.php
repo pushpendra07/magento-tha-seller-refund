@@ -165,13 +165,11 @@ class RefundProcessor
             ]);
             return;
         } catch (ErpConflictException $e) {
-            $this->stateMachine->transition(
-                $refund,
-                RefundInterface::STATUS_FAILED,
-                RefundEventInterface::TYPE_ERP_CREATE,
-                [RefundInterface::CREATE_STATUS => RefundInterface::SUB_BUSINESS_REJECTED]
-            );
-            $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_CREATE, RefundInterface::SUB_BUSINESS_REJECTED, [
+            // HTTP 409: the ERP already holds a credit note for this refund_no with a different
+            // payload. Moving to failed would release the quantity for another refund while that
+            // credit note exists, so the refund is held at calculated for reconciliation instead.
+            $this->stateMachine->setSubStatus($refund, RefundInterface::CREATE_STATUS, RefundInterface::SUB_CONFLICT);
+            $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_CREATE, RefundInterface::SUB_CONFLICT, [
                 'api_code' => 'create',
                 'attempt_no' => $attemptNo,
                 'error_code' => 'conflict',
