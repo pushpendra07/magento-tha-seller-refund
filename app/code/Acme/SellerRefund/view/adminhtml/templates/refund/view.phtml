@@ -1,5 +1,6 @@
 <?php
 /** @var \Acme\SellerRefund\Block\Adminhtml\Refund\View $block */
+/** @var \Magento\Framework\Escaper $escaper */
 $refund = $block->getRefund();
 $figures = $block->getFigures();
 $currency = $figures->currency;
@@ -8,7 +9,7 @@ $canSeeRaw = $block->canSeeRawPayload();
 <div class="acme-refund-detail">
     <section class="acme-refund-summary">
         <h2><?= $block->escapeHtml($refund->getRefundNo()) ?></h2>
-        <table class="data table">
+        <table class="admin__table-secondary">
             <tbody>
                 <tr><th><?= $block->escapeHtml(__('Status')) ?></th><td><?= $block->escapeHtml($refund->getStatus()) ?></td></tr>
                 <tr><th><?= $block->escapeHtml(__('Refund Type')) ?></th><td><?= $block->escapeHtml($refund->getRefundType()) ?></td></tr>
@@ -23,7 +24,7 @@ $canSeeRaw = $block->canSeeRawPayload();
 
     <section class="acme-refund-figures">
         <h3><?= $block->escapeHtml(__('Pre-refund Total')) ?></h3>
-        <table class="data table">
+        <table class="admin__table-secondary">
             <tbody>
                 <tr><th><?= $block->escapeHtml(__('Product Subtotal')) ?></th><td><?= $block->escapeHtml($block->formatMoney($figures->preRefundSubtotal, $currency)) ?></td></tr>
                 <tr><th><?= $block->escapeHtml(__('Shipping')) ?></th><td><?= $block->escapeHtml($block->formatMoney($figures->preRefundShipping, $currency)) ?></td></tr>
@@ -33,7 +34,7 @@ $canSeeRaw = $block->canSeeRawPayload();
         </table>
 
         <h3><?= $block->escapeHtml(__('Refund')) ?><?php if ($figures->isPartial()): ?> <?= $block->escapeHtml(__('(Partial)')) ?><?php endif; ?></h3>
-        <table class="data table">
+        <table class="data-table admin__table-primary">
             <thead>
                 <tr>
                     <th><?= $block->escapeHtml(__('SKU')) ?></th>
@@ -62,13 +63,68 @@ $canSeeRaw = $block->canSeeRawPayload();
         </table>
     </section>
 
-    <section class="acme-refund-actions">
-        <a class="action-secondary" href="<?= $block->escapeUrl($block->getActionUrl('receipt')) ?>"><?= $block->escapeHtml(__('Download Receipt')) ?></a>
+    <section class="acme-refund-actions" id="acme-refund-actions">
+        <?php if ($block->canDownloadReceipt()): ?>
+            <a class="action-secondary" href="<?= $escaper->escapeUrl($block->getActionUrl('receipt')) ?>">
+                <?= $escaper->escapeHtml(__('Download Receipt')) ?>
+            </a>
+        <?php endif; ?>
+
+        <?php if ($block->canRegisterCashRefund()): ?>
+            <fieldset class="admin__fieldset acme-refund-cash">
+                <legend class="admin__legend"><span><?= $escaper->escapeHtml(__('Refund Complete')) ?></span></legend>
+                <div class="admin__field _required">
+                    <label class="admin__field-label" for="acme-refund-txn-number">
+                        <span><?= $escaper->escapeHtml(__('Bank Transaction Number')) ?></span>
+                    </label>
+                    <div class="admin__field-control">
+                        <input id="acme-refund-txn-number" class="admin__control-text" type="text"
+                               maxlength="64" data-role="txn-number"/>
+                    </div>
+                </div>
+                <div class="admin__field _required">
+                    <label class="admin__field-label" for="acme-refund-txn-date">
+                        <span><?= $escaper->escapeHtml(__('Transaction Date')) ?></span>
+                    </label>
+                    <div class="admin__field-control">
+                        <input id="acme-refund-txn-date" class="admin__control-text" type="date" data-role="txn-date"/>
+                    </div>
+                </div>
+                <button type="button" class="action-primary" data-role="complete">
+                    <span><?= $escaper->escapeHtml(__('Register Cash Refund')) ?></span>
+                </button>
+            </fieldset>
+        <?php endif; ?>
+
+        <?php if ($block->canRetry()): ?>
+            <button type="button" class="action-secondary" data-role="retry">
+                <span><?= $escaper->escapeHtml(__('Retry ERP Operation')) ?></span>
+            </button>
+        <?php endif; ?>
+
+        <?php if ($block->canCancel()): ?>
+            <button type="button" class="action-secondary" data-role="cancel">
+                <span><?= $escaper->escapeHtml(__('Cancel Refund')) ?></span>
+            </button>
+        <?php endif; ?>
+
+        <p class="message" data-role="action-message" hidden="hidden"></p>
     </section>
+
+    <script type="text/x-magento-init">
+        {
+            "#acme-refund-actions": {
+                "acmeRefundActions": <?= /* @noEscape */ json_encode(
+                    $block->getActionsConfig(),
+                    JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP
+                ) ?>
+            }
+        }
+    </script>
 
     <section class="acme-refund-audit">
         <h3><?= $block->escapeHtml(__('Audit Log')) ?></h3>
-        <table class="data table">
+        <table class="data-table admin__table-primary">
             <thead>
                 <tr>
                     <th><?= $block->escapeHtml(__('When')) ?></th>

@@ -7,6 +7,7 @@ namespace Acme\SellerRefund\Block\Adminhtml\Refund;
 use Acme\SellerRefund\Api\Data\RefundEventInterface;
 use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\RefundRepositoryInterface;
+use Acme\SellerRefund\Model\RefundStateMachine;
 use Acme\SellerRefund\Model\ResourceModel\RefundEvent\CollectionFactory as EventCollectionFactory;
 use Acme\SellerRefund\Model\Total\RefundFigures;
 use Acme\SellerRefund\Model\Total\RefundTotalCalculator;
@@ -30,6 +31,7 @@ class View extends Template
         private readonly RefundTotalCalculator $calculator,
         private readonly EventCollectionFactory $eventCollectionFactory,
         private readonly AuthorizationInterface $authorization,
+        private readonly RefundStateMachine $stateMachine,
         array $data = []
     ) {
         parent::__construct($context, $data);
@@ -71,6 +73,72 @@ class View extends Template
     public function canSeeRawPayload(): bool
     {
         return $this->authorization->isAllowed('Acme_SellerRefund::audit');
+    }
+
+    /**
+     * Refund Complete is offered while the credit note is open and the cash refund is unregistered (§10.3).
+     *
+     * @return bool
+     */
+    public function canRegisterCashRefund(): bool
+    {
+        return $this->authorization->isAllowed('Acme_SellerRefund::cash_register')
+            && $this->getRefund()->getStatus() === RefundInterface::STATUS_CASH_REFUND_PENDING;
+    }
+
+    /**
+     * Replay is offered for the states that have a retriable ERP operation (§9.6).
+     *
+     * @return bool
+     */
+    public function canRetry(): bool
+    {
+        return $this->authorization->isAllowed('Acme_SellerRefund::retry')
+            && in_array(
+                $this->getRefund()->getStatus(),
+                [
+                    RefundInterface::STATUS_CALCULATED,
+                    RefundInterface::STATUS_CASH_REFUNDED,
+                    RefundInterface::STATUS_ERP_CONFIRM_PENDING,
+                ],
+                true
+            );
+    }
+
+    /**
+     * Cancel follows the lifecycle guard, so the button never offers what the server refuses.
+     *
+     * @return bool
+     */
+    public function canCancel(): bool
+    {
+        return $this->authorization->isAllowed('Acme_SellerRefund::cancel')
+            && $this->stateMachine->canCancel($this->getRefund());
+    }
+
+    /**
+     * Whether the receipt download is permitted for the current admin user.
+     *
+     * @return bool
+     */
+    public function canDownloadReceipt(): bool
+    {
+        return $this->authorization->isAllowed('Acme_SellerRefund::receipt');
+    }
+
+    /**
+     * Configuration for the refund action widget.
+     *
+     * @return array<string, string>
+     */
+    public function getActionsConfig(): array
+    {
+        return [
+            'completeUrl' => $this->getActionUrl('complete'),
+            'retryUrl' => $this->getActionUrl('retry'),
+            'cancelUrl' => $this->getActionUrl('cancel'),
+            'formKey' => $this->getFormKey(),
+        ];
     }
 
     public function getActionUrl(string $action): string
