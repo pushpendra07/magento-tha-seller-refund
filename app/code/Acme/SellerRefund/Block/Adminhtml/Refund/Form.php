@@ -11,6 +11,7 @@ use Acme\SellerRefund\Model\Tax\LineTaxRate;
 use Acme\SellerRefund\Model\Tax\TaxCodeResolver;
 use Magento\Backend\Block\Template;
 use Magento\Backend\Block\Template\Context;
+use Magento\Backend\Block\Widget\Button;
 use Magento\Framework\Data\Form\FormKey;
 use Magento\Sales\Api\Data\OrderInterface;
 use Magento\Sales\Api\OrderRepositoryInterface;
@@ -35,6 +36,39 @@ class Form extends Template
         array $data = []
     ) {
         parent::__construct($context, $data);
+    }
+
+    /**
+     * Add a Back button to the page actions toolbar, as Magento's own admin pages do.
+     *
+     * @return $this
+     */
+    protected function _prepareLayout()
+    {
+        $toolbar = $this->getLayout()->getBlock('page.actions.toolbar');
+        if ($toolbar) {
+            $toolbar->addChild(
+                'acme_refund_back',
+                Button::class,
+                [
+                    'label' => __('Back'),
+                    'class' => 'back',
+                    'onclick' => sprintf("setLocation('%s')", $this->escapeJs($this->getBackUrl())),
+                ]
+            );
+        }
+
+        return parent::_prepareLayout();
+    }
+
+    /**
+     * The order this refund is being created for.
+     *
+     * @return string
+     */
+    public function getBackUrl(): string
+    {
+        return $this->getUrl('sales/order/view', ['order_id' => $this->getOrderId()]);
     }
 
     public function getOrderId(): int
