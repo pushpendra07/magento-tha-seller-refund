@@ -6,7 +6,6 @@ namespace Acme\SellerRefund\Model\Erp;
 
 use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\Data\RefundItemInterface;
-use Acme\SellerRefund\Model\Tax\TaxCodeResolver;
 use Magento\Sales\Api\Data\OrderInterface;
 
 /**
@@ -15,11 +14,6 @@ use Magento\Sales\Api\Data\OrderInterface;
 class PayloadBuilder
 {
     private const TAX_MODE = 'TAX_EXCLUDED';
-
-    public function __construct(
-        private readonly TaxCodeResolver $taxCodeResolver
-    ) {
-    }
 
     /**
      * @param RefundItemInterface[] $items
@@ -56,7 +50,7 @@ class PayloadBuilder
     {
         return [
             [
-                'code' => (string) $this->taxCodeResolver->toOptionId($item->getTaxCode()),
+                'code' => $item->getTaxCode(),
                 'amount' => $item->getTaxAmount(),
             ],
         ];
