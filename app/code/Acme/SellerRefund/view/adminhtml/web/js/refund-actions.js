@@ -2,8 +2,9 @@ define([
     'jquery',
     'mage/translate',
     'Magento_Ui/js/modal/confirm',
+    'Magento_Ui/js/modal/alert',
     'jquery-ui-modules/widget'
-], function ($, $t, confirm) {
+], function ($, $t, confirm, alert) {
     'use strict';
 
     /**
@@ -126,10 +127,20 @@ define([
          * @param {Boolean} isError
          */
         _message: function (text, isError) {
+            // Errors open a dialog, like the refund entry form; text is escaped first.
+            if (isError) {
+                alert({
+                    title: $t('Cannot complete the action'),
+                    content: $('<div>').text(text).html()
+                });
+
+                return;
+            }
+
             this.element.find(this.options.selectors.message)
                 .text(text)
-                .toggleClass('message-error error', isError)
-                .toggleClass('message-success success', !isError)
+                .removeClass('message-error error')
+                .addClass('message-success success')
                 .prop('hidden', false);
         }
     });
