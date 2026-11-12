@@ -9,6 +9,7 @@ use Acme\SellerRefund\Api\RefundRepositoryInterface;
 use Acme\SellerRefund\Model\Config;
 use Acme\SellerRefund\Model\Total\RefundTotalCalculator;
 use Magento\Framework\App\Area;
+use Magento\Framework\App\State;
 use Magento\Framework\Mail\Template\FactoryInterface as TemplateFactoryInterface;
 use Magento\Framework\Mail\Template\TransportBuilder;
 use Magento\Sales\Api\Data\OrderInterface;
@@ -29,11 +30,46 @@ class RefundConfirmationSender
         private readonly TransportBuilder $transportBuilder,
         private readonly TemplateFactoryInterface $templateFactory,
         private readonly Emulation $appEmulation,
-        private readonly Config $config
+        private readonly Config $config,
+        private readonly State $appState
     ) {
     }
 
+    /**
+     * Render the confirmation email body.
+     *
+     * @param RefundInterface $refund
+     * @return string
+     */
     public function render(RefundInterface $refund): string
+    {
+        return $this->appState->emulateAreaCode(Area::AREA_FRONTEND, fn (): string => $this->doRender($refund));
+    }
+
+    /**
+     * Send the confirmation email to the order's customer.
+     *
+     * The outbox worker runs in the crontab area. Store emulation alone leaves the design theme
+     * bound to that area, and the theme fallback then fails ("theme_dir was not passed"), so the
+     * application area is switched to frontend for the duration as well.
+     *
+     * @param RefundInterface $refund
+     * @return void
+     */
+    public function send(RefundInterface $refund): void
+    {
+        $this->appState->emulateAreaCode(Area::AREA_FRONTEND, function () use ($refund): void {
+            $this->doSend($refund);
+        });
+    }
+
+    /**
+     * Render inside store emulation; the caller has already set the frontend area.
+     *
+     * @param RefundInterface $refund
+     * @return string
+     */
+    private function doRender(RefundInterface $refund): string
     {
         [, $vars, $storeId] = $this->prepare($refund);
 
@@ -49,7 +85,13 @@ class RefundConfirmationSender
         }
     }
 
-    public function send(RefundInterface $refund): void
+    /**
+     * Build and send the message inside store emulation; the caller has set the frontend area.
+     *
+     * @param RefundInterface $refund
+     * @return void
+     */
+    private function doSend(RefundInterface $refund): void
     {
         [$order, $vars, $storeId] = $this->prepare($refund);
         $email = (string) $order->getCustomerEmail();
