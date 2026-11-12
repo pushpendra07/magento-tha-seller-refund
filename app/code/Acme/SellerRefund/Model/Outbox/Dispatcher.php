@@ -25,7 +25,15 @@ class Dispatcher
     ) {
     }
 
-    public function run(?string $op, int $limit): int
+    /**
+     * Claim and process due jobs; with $refundId, only that refund's jobs.
+     *
+     * @param string|null $op
+     * @param int $limit
+     * @param int|null $refundId
+     * @return int number of jobs processed
+     */
+    public function run(?string $op, int $limit, ?int $refundId = null): int
     {
         $operations = $op !== null
             ? [$op]
@@ -33,7 +41,7 @@ class Dispatcher
 
         $processed = 0;
         foreach ($operations as $operation) {
-            foreach ($this->outbox->claim($operation, $limit) as $row) {
+            foreach ($this->outbox->claim($operation, $limit, $refundId) as $row) {
                 $this->handle($operation, $row);
                 $processed++;
             }

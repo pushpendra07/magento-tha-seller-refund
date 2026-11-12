@@ -39,7 +39,8 @@ class Save extends Action implements HttpPostActionInterface
             $data['actor_id'] = (int) ($this->_auth->getUser() ? $this->_auth->getUser()->getId() : 0);
 
             $refund = $this->processor->submit($orderId, RefundSubmission::fromRequest($data));
-            $created = $this->dispatcher->run(Outbox::OP_CREATE, 1);
+            // Best-effort immediate attempt for this refund only; the worker covers any failure.
+            $created = $this->dispatcher->run(Outbox::OP_CREATE, 1, (int) $refund->getEntityId());
             $fresh = $this->refundRepository->getById((int) $refund->getEntityId());
 
             return $result->setData([
