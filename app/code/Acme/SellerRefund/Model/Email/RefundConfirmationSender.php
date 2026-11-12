@@ -54,13 +54,14 @@ class RefundConfirmationSender
      * application area is switched to frontend for the duration as well.
      *
      * @param RefundInterface $refund
-     * @return void
+     * @return bool false when the order has no customer email, so nothing was sent
      */
-    public function send(RefundInterface $refund): void
+    public function send(RefundInterface $refund): bool
     {
-        $this->appState->emulateAreaCode(Area::AREA_FRONTEND, function () use ($refund): void {
-            $this->doSend($refund);
-        });
+        return $this->appState->emulateAreaCode(
+            Area::AREA_FRONTEND,
+            fn (): bool => $this->doSend($refund)
+        );
     }
 
     /**
@@ -89,14 +90,14 @@ class RefundConfirmationSender
      * Build and send the message inside store emulation; the caller has set the frontend area.
      *
      * @param RefundInterface $refund
-     * @return void
+     * @return bool
      */
-    private function doSend(RefundInterface $refund): void
+    private function doSend(RefundInterface $refund): bool
     {
         [$order, $vars, $storeId] = $this->prepare($refund);
         $email = (string) $order->getCustomerEmail();
         if ($email === '') {
-            return;
+            return false;
         }
 
         $this->appEmulation->startEnvironmentEmulation($storeId, Area::AREA_FRONTEND, true);
@@ -113,6 +114,8 @@ class RefundConfirmationSender
         } finally {
             $this->appEmulation->stopEnvironmentEmulation();
         }
+
+        return true;
     }
 
     /**

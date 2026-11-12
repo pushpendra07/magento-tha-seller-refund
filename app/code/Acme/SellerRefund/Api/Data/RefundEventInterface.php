@@ -31,6 +31,11 @@ interface RefundEventInterface
     public const TYPE_CASH_REGISTERED = 'cash_registered';
     public const TYPE_REPLAY = 'replay';
     public const TYPE_CANCELLED = 'cancelled';
+    public const TYPE_EMAIL_CONFIRMATION = 'email_confirmation';
+
+    /** Outcome of the confirmation email; distinct from the refund statuses. */
+    public const EMAIL_NOT_SENT = 'not_sent';
+    public const EMAIL_SKIPPED = 'skipped';
 
     public function getEntityId(): ?int;
 
