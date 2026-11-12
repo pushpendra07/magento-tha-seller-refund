@@ -87,6 +87,7 @@ class Collection extends SearchResult
             RefundInterface::SUB_BUSINESS_REJECTED,
             RefundInterface::SUB_CONFLICT,
             RefundInterface::SUB_INVALID_PAYLOAD,
+            RefundInterface::SUB_RETRIES_EXHAUSTED,
         ]);
         $dead = $connection->quote(Outbox::STATE_DEAD);
 

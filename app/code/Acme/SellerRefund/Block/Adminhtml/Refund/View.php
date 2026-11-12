@@ -40,6 +40,7 @@ class View extends Template
         RefundInterface::SUB_BUSINESS_REJECTED => 'grid-severity-critical',
         RefundInterface::SUB_CONFLICT => 'grid-severity-critical',
         RefundInterface::SUB_INVALID_PAYLOAD => 'grid-severity-critical',
+        RefundInterface::SUB_RETRIES_EXHAUSTED => 'grid-severity-critical',
         RefundEventInterface::EMAIL_NOT_SENT => 'grid-severity-critical',
         RefundEventInterface::EMAIL_SKIPPED => 'grid-severity-minor',
     ];

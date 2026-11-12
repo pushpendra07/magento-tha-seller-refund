@@ -50,6 +50,7 @@ interface RefundInterface
     public const SUB_BUSINESS_REJECTED = 'business_rejected';
     public const SUB_CONFLICT = 'conflict';
     public const SUB_INVALID_PAYLOAD = 'invalid_payload';
+    public const SUB_RETRIES_EXHAUSTED = 'retries_exhausted';
 
     public const TYPE_FULL = 'full';
     public const TYPE_PARTIAL = 'partial';

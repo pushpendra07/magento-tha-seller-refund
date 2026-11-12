@@ -6,6 +6,7 @@ namespace Acme\SellerRefund\Test\Integration;
 
 use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\RefundRepositoryInterface;
+use Acme\SellerRefund\Model\Config;
 use Acme\SellerRefund\Model\Outbox\Dispatcher;
 use Acme\SellerRefund\Model\Outbox\Outbox;
 use Acme\SellerRefund\Model\Reconciler;
@@ -77,6 +78,46 @@ class OutboxRecoveryTest extends DbTransactionTestCase
         self::assertSame(RefundInterface::STATUS_CASH_REFUND_PENDING, $repository->getById($newer)->getStatus());
         self::assertSame(RefundInterface::STATUS_CALCULATED, $repository->getById($older)->getStatus());
         self::assertTrue($this->get(Outbox::class)->hasPending($older), 'The older job must still be queued.');
+    }
+
+    /**
+     * After the last allowed attempt the refund must say the retries are exhausted, not
+     * "Retrying"; a replay queues the call again and the next run can succeed (FRD 14).
+     */
+    public function testExhaustedRetriesAreShownAndAReplayRecovers(): void
+    {
+        $stub = $this->get(ErpStub::class);
+        $stub->reset();
+        $stub->setFailmode('server_error_5xx');
+        $processor = $this->get(RefundProcessor::class);
+        $dispatcher = $this->get(Dispatcher::class);
+        $repository = $this->get(RefundRepositoryInterface::class);
+        $refundId = $this->submitOne($this->get(SeedOrders::class), $processor, 'SR-ORD-1001');
+        $outbox = $this->get(ResourceConnection::class)->getTableName('mp_refund_outbox');
+
+        $maxAttempts = $this->get(Config::class)->maxAttempts();
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            $this->connection()->update(
+                $outbox,
+                ['available_at' => '2000-01-01 00:00:00'],
+                ['refund_id = ?' => $refundId, 'state = ?' => Outbox::STATE_PENDING]
+            );
+            $dispatcher->run(Outbox::OP_CREATE, 1, $refundId);
+        }
+
+        $refund = $repository->getById($refundId);
+        self::assertSame(RefundInterface::STATUS_CALCULATED, $refund->getStatus());
+        self::assertSame(RefundInterface::SUB_RETRIES_EXHAUSTED, $refund->getCreateStatus());
+        self::assertTrue($this->get(Outbox::class)->hasDead($refundId, Outbox::OP_CREATE));
+
+        $processor->replay($refundId, null);
+        self::assertSame(RefundInterface::SUB_PENDING, $repository->getById($refundId)->getCreateStatus());
+
+        $stub->setFailmode('ok');
+        $dispatcher->run(Outbox::OP_CREATE, 1, $refundId);
+        $refund = $repository->getById($refundId);
+        self::assertSame(RefundInterface::STATUS_CASH_REFUND_PENDING, $refund->getStatus());
+        self::assertSame(RefundInterface::SUB_SUCCEEDED, $refund->getCreateStatus());
     }
 
     /**

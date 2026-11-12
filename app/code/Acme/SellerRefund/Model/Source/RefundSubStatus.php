@@ -56,6 +56,7 @@ class RefundSubStatus implements OptionSourceInterface
             RefundInterface::SUB_BUSINESS_REJECTED => __('Rejected'),
             RefundInterface::SUB_CONFLICT => __('Conflict, needs reconciliation'),
             RefundInterface::SUB_INVALID_PAYLOAD => __('Invalid data, not sent'),
+            RefundInterface::SUB_RETRIES_EXHAUSTED => __('Retries exhausted, needs replay'),
         ];
     }
 }

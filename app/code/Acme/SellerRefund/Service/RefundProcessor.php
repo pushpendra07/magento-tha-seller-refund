@@ -43,6 +43,19 @@ use Magento\Sales\Api\OrderRepositoryInterface;
 class RefundProcessor
 {
     /**
+     * Outbox operation => [sub-status field, audit event type, api code].
+     */
+    private const OPERATION_SUB_STATUS = [
+        Outbox::OP_CREATE => [RefundInterface::CREATE_STATUS, RefundEventInterface::TYPE_ERP_CREATE, 'create'],
+        Outbox::OP_STATUS_CHECK => [
+            RefundInterface::STATUS_CHECK_STATUS,
+            RefundEventInterface::TYPE_ERP_STATUS,
+            'status',
+        ],
+        Outbox::OP_CONFIRM => [RefundInterface::CONFIRM_STATUS, RefundEventInterface::TYPE_ERP_CONFIRM, 'confirm'],
+    ];
+
+    /**
      * ERP credit-note state that may be confirmed (FRD section 9.2).
      */
     private const ERP_STATUS_PENDING = 'refund-pending';
@@ -412,9 +425,45 @@ class RefundProcessor
             'created_by' => $actorId,
         ]);
 
+        // The replayed call is queued again, so it is no longer "retries exhausted".
+        $field = self::OPERATION_SUB_STATUS[$operation][0];
+        $current = match ($operation) {
+            Outbox::OP_CREATE => $refund->getCreateStatus(),
+            Outbox::OP_STATUS_CHECK => $refund->getStatusCheckStatus(),
+            default => $refund->getConfirmStatus(),
+        };
+        if ($current === RefundInterface::SUB_RETRIES_EXHAUSTED) {
+            $this->stateMachine->setSubStatus($refund, $field, RefundInterface::SUB_PENDING);
+        }
+
         if (!$this->outbox->hasPending($refundId)) {
             $this->outbox->enqueue($refundId, $operation);
         }
+    }
+
+    /**
+     * Record that the outbox stopped retrying an ERP call after its last allowed attempt.
+     *
+     * The main status is unchanged (FRD 7: transient errors never change it); the call's
+     * sub-status says the retries are used up, so the refund waits for an operator replay.
+     *
+     * @param int $refundId
+     * @param string $operation Outbox::OP_* value
+     * @param int $attemptNo the last attempt made
+     * @return void
+     */
+    public function markRetriesExhausted(int $refundId, string $operation, int $attemptNo): void
+    {
+        if (!isset(self::OPERATION_SUB_STATUS[$operation])) {
+            return;
+        }
+        [$field, $eventType, $apiCode] = self::OPERATION_SUB_STATUS[$operation];
+        $refund = $this->refundRepository->getById($refundId);
+        $this->stateMachine->setSubStatus($refund, $field, RefundInterface::SUB_RETRIES_EXHAUSTED);
+        $this->eventRecorder->record($refundId, $eventType, RefundInterface::SUB_RETRIES_EXHAUSTED, [
+            'api_code' => $apiCode,
+            'attempt_no' => $attemptNo,
+        ]);
     }
 
     private function saveItems(int $refundId, \Acme\SellerRefund\Model\Total\RefundFigures $figures, \Magento\Sales\Api\Data\OrderInterface $order, array $prior): void
