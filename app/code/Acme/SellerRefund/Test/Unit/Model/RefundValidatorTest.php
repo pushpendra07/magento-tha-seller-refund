@@ -63,6 +63,41 @@ class RefundValidatorTest extends TestCase
         $this->validator->validate($this->order, $submission, [5 => '0']);
     }
 
+    /**
+     * Seller lines are refunded in whole units; 0.5 would reach the ERP as quantity 0.
+     *
+     * @dataProvider notWholeQuantityProvider
+     */
+    public function testQuantityThatIsNotAWholeNumberIsRejected(string $qty): void
+    {
+        $this->sellerLineResolver->method('sellerLines')->willReturn([
+            5 => $this->orderItem('3'),
+        ]);
+
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('must be a whole number');
+        $this->validator->validate($this->order, new RefundSubmission('defect', [5 => $qty]), []);
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function notWholeQuantityProvider(): array
+    {
+        return ['half' => ['0.5'], 'decimal' => ['1.25'], 'text' => ['abc'], 'exponent' => ['1e0']];
+    }
+
+    public function testWholeQuantityWithDecimalZerosIsAccepted(): void
+    {
+        $this->sellerLineResolver->method('sellerLines')->willReturn([
+            5 => $this->orderItem('3'),
+        ]);
+
+        $this->validator->validate($this->order, new RefundSubmission('defect', [5 => '1.0000']), []);
+
+        $this->addToAssertionCount(1);
+    }
+
     public function testZeroQuantityIsRejected(): void
     {
         $this->sellerLineResolver->method('sellerLines')->willReturn([

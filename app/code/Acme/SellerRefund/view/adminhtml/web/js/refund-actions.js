@@ -48,6 +48,18 @@ define([
                 return;
             }
 
+            // The server re-checks both values (BR-10); these only give an early message.
+            if (number.length > 64) {
+                this._message($t('The bank transaction number can have at most 64 characters.'), true);
+
+                return;
+            }
+            if (date > (this.element.find(this.options.selectors.txnDate).attr('max') || date)) {
+                this._message($t('The transaction date cannot be in the future.'), true);
+
+                return;
+            }
+
             this._confirmAndPost(
                 $t('Register the cash refund with transaction %1 on %2?').replace('%1', number).replace('%2', date),
                 this.options.completeUrl,

@@ -207,6 +207,7 @@ $hasActions = $block->canRegisterCashRefund() || $block->canRetry() || $block->c
                         </label>
                         <div class="admin__field-control">
                             <input id="acme-refund-txn-date" class="admin__control-text" type="date"
+                                   max="<?= $escaper->escapeHtmlAttr($block->getTodayDate()) ?>"
                                    data-role="txn-date"/>
                         </div>
                     </div>

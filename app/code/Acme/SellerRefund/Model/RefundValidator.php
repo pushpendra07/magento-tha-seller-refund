@@ -46,6 +46,14 @@ class RefundValidator
                 );
             }
 
+            // Seller lines are refunded in whole units; a fraction would reach the ERP as quantity 0
+            // with a non-zero amount. Checked before any arithmetic, so text is rejected cleanly.
+            if (!preg_match('/^-?\d+(\.0+)?$/', $qty)) {
+                throw new ValidationException(
+                    __('The refund quantity for order item %1 must be a whole number.', $orderItemId)
+                );
+            }
+
             if (bccomp($qty, '0', 4) <= 0) {
                 throw new ValidationException(
                     __('The refund quantity for order item %1 must be greater than zero.', $orderItemId)

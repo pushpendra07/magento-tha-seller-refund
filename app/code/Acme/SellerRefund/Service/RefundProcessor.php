@@ -9,11 +9,13 @@ use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\RefundRepositoryInterface;
 use Acme\SellerRefund\Exception\IllegalTransitionException;
 use Acme\SellerRefund\Exception\NotEligibleException;
+use Acme\SellerRefund\Exception\ValidationException;
 use Acme\SellerRefund\Model\Erp\ErpRefundClient;
 use Acme\SellerRefund\Model\Erp\Exception\ErpBusinessException;
 use Acme\SellerRefund\Model\Erp\Exception\ErpConflictException;
 use Acme\SellerRefund\Model\Erp\Exception\ErpTransientException;
 use Acme\SellerRefund\Model\Erp\PayloadBuilder;
+use Acme\SellerRefund\Model\Erp\PayloadValidator;
 use Acme\SellerRefund\Model\Event\EventRecorder;
 use Acme\SellerRefund\Model\Outbox\Outbox;
 use Acme\SellerRefund\Model\RefundFactory;
@@ -45,6 +47,11 @@ class RefundProcessor
      */
     private const ERP_STATUS_PENDING = 'refund-pending';
 
+    /**
+     * Column size of mp_refund.transaction_number.
+     */
+    private const TRANSACTION_NUMBER_MAX = 64;
+
     public function __construct(
         private readonly RefundRepositoryInterface $refundRepository,
         private readonly ResourceConnection $resource,
@@ -66,7 +73,8 @@ class RefundProcessor
         private readonly PayloadBuilder $payloadBuilder,
         private readonly EventManagerInterface $eventManager,
         private readonly TimezoneInterface $timezone,
-        private readonly RefundEligibility $eligibility
+        private readonly RefundEligibility $eligibility,
+        private readonly PayloadValidator $payloadValidator
     ) {
     }
 
@@ -152,6 +160,15 @@ class RefundProcessor
         $items = $this->refundRepository->getItems($refundId);
         $order = $this->orderRepository->get($refund->getOrderId());
         $payload = $this->payloadBuilder->build($refund, $items, $order);
+        $this->guardRequest(
+            $refund,
+            RefundInterface::CREATE_STATUS,
+            RefundEventInterface::TYPE_ERP_CREATE,
+            'create',
+            $attemptNo,
+            $payload,
+            fn () => $this->payloadValidator->validateCreate($payload)
+        );
 
         $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_CREATE, RefundInterface::SUB_PENDING, [
             'api_code' => 'create',
@@ -213,6 +230,10 @@ class RefundProcessor
 
     public function registerCashRefund(int $refundId, string $txnNumber, string $txnDate, ?int $actorId): void
     {
+        $txnNumber = trim($txnNumber);
+        $this->assertCashRegistration($txnNumber, trim($txnDate));
+        $txnDate = trim($txnDate);
+
         $refund = $this->refundRepository->getById($refundId);
         $this->stateMachine->transition(
             $refund,
@@ -239,6 +260,15 @@ class RefundProcessor
         }
 
         $erpId = (string) $refund->getErpRefundId();
+        $this->guardRequest(
+            $refund,
+            RefundInterface::STATUS_CHECK_STATUS,
+            RefundEventInterface::TYPE_ERP_STATUS,
+            'status',
+            $attemptNo,
+            ['erp_refund_id' => $erpId],
+            fn () => $this->payloadValidator->validateErpRefundId($erpId)
+        );
         $this->stateMachine->setSubStatus($refund, RefundInterface::STATUS_CHECK_STATUS, RefundInterface::SUB_PENDING);
 
         try {
@@ -302,6 +332,15 @@ class RefundProcessor
 
         $erpId = (string) $refund->getErpRefundId();
         $payload = $this->payloadBuilder->buildConfirm($refund);
+        $this->guardRequest(
+            $refund,
+            RefundInterface::CONFIRM_STATUS,
+            RefundEventInterface::TYPE_ERP_CONFIRM,
+            'confirm',
+            $attemptNo,
+            $payload,
+            fn () => $this->payloadValidator->validateConfirm($erpId, $payload)
+        );
         $this->stateMachine->setSubStatus($refund, RefundInterface::CONFIRM_STATUS, RefundInterface::SUB_PENDING);
 
         try {
@@ -414,5 +453,74 @@ class RefundProcessor
     private function stringOrNull(mixed $value): ?string
     {
         return $value === null || $value === '' ? null : (string) $value;
+    }
+
+    /**
+     * Check an ERP request locally; when it can never succeed, record why and stop before HTTP.
+     *
+     * @param RefundInterface $refund
+     * @param string $subStatusField
+     * @param string $eventType
+     * @param string $apiCode
+     * @param int $attemptNo
+     * @param array $payload
+     * @param callable $check throws ValidationException when the request is invalid
+     * @return void
+     * @throws ValidationException
+     */
+    private function guardRequest(
+        RefundInterface $refund,
+        string $subStatusField,
+        string $eventType,
+        string $apiCode,
+        int $attemptNo,
+        array $payload,
+        callable $check
+    ): void {
+        try {
+            $check();
+        } catch (ValidationException $e) {
+            $this->stateMachine->setSubStatus($refund, $subStatusField, RefundInterface::SUB_INVALID_PAYLOAD);
+            $this->eventRecorder->record(
+                (int) $refund->getEntityId(),
+                $eventType,
+                RefundInterface::SUB_INVALID_PAYLOAD,
+                [
+                    'api_code' => $apiCode,
+                    'attempt_no' => $attemptNo,
+                    'error_code' => 'invalid_payload',
+                    'request_payload' => $payload,
+                ]
+            );
+            throw $e;
+        }
+    }
+
+    /**
+     * BR-10: a cash refund needs a real bank transaction number and date before the ERP is told.
+     *
+     * @param string $txnNumber
+     * @param string $txnDate
+     * @return void
+     * @throws ValidationException
+     */
+    private function assertCashRegistration(string $txnNumber, string $txnDate): void
+    {
+        if ($txnNumber === '') {
+            throw new ValidationException(__('Enter the bank transaction number.'));
+        }
+        if (mb_strlen($txnNumber) > self::TRANSACTION_NUMBER_MAX) {
+            throw new ValidationException(
+                __('The bank transaction number can have at most %1 characters.', self::TRANSACTION_NUMBER_MAX)
+            );
+        }
+
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $txnDate);
+        if ($date === false || $date->format('Y-m-d') !== $txnDate) {
+            throw new ValidationException(__('Enter the transaction date as YYYY-MM-DD.'));
+        }
+        if ($txnDate > $this->timezone->date()->format('Y-m-d')) {
+            throw new ValidationException(__('The transaction date cannot be in the future.'));
+        }
     }
 }

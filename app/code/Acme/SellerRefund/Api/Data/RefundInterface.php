@@ -49,6 +49,7 @@ interface RefundInterface
     public const SUB_RETRYABLE_ERROR = 'retryable_error';
     public const SUB_BUSINESS_REJECTED = 'business_rejected';
     public const SUB_CONFLICT = 'conflict';
+    public const SUB_INVALID_PAYLOAD = 'invalid_payload';
 
     public const TYPE_FULL = 'full';
     public const TYPE_PARTIAL = 'partial';

@@ -49,6 +49,7 @@ class View extends Template
         RefundInterface::SUB_RETRYABLE_ERROR => 'Retrying',
         RefundInterface::SUB_BUSINESS_REJECTED => 'Rejected',
         RefundInterface::SUB_CONFLICT => 'Conflict, needs reconciliation',
+        RefundInterface::SUB_INVALID_PAYLOAD => 'Invalid data, not sent',
     ];
 
     /**
@@ -62,6 +63,7 @@ class View extends Template
         RefundInterface::STATUS_CANCELLED => 'grid-severity-critical',
         RefundInterface::SUB_BUSINESS_REJECTED => 'grid-severity-critical',
         RefundInterface::SUB_CONFLICT => 'grid-severity-critical',
+        RefundInterface::SUB_INVALID_PAYLOAD => 'grid-severity-critical',
     ];
 
     private ?RefundInterface $refund = null;
@@ -313,6 +315,16 @@ class View extends Template
     public function canDownloadReceipt(): bool
     {
         return $this->authorization->isAllowed('Acme_SellerRefund::receipt');
+    }
+
+    /**
+     * Today in the store's timezone, the latest valid bank transaction date (Y-m-d).
+     *
+     * @return string
+     */
+    public function getTodayDate(): string
+    {
+        return $this->_localeDate->date()->format('Y-m-d');
     }
 
     /**

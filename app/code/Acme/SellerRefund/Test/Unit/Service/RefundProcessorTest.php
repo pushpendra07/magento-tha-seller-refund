@@ -6,12 +6,14 @@ namespace Acme\SellerRefund\Test\Unit\Service;
 
 use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\RefundRepositoryInterface;
+use Acme\SellerRefund\Exception\ValidationException;
 use Acme\SellerRefund\Model\Erp\CreateResult;
 use Acme\SellerRefund\Model\Erp\ErpRefundClient;
 use Acme\SellerRefund\Model\Erp\Exception\ErpBusinessException;
 use Acme\SellerRefund\Model\Erp\Exception\ErpConflictException;
 use Acme\SellerRefund\Model\Erp\Exception\ErpTransientException;
 use Acme\SellerRefund\Model\Erp\PayloadBuilder;
+use Acme\SellerRefund\Model\Erp\PayloadValidator;
 use Acme\SellerRefund\Model\Event\EventRecorder;
 use Acme\SellerRefund\Model\Outbox\Outbox;
 use Acme\SellerRefund\Model\RefundEligibility;
@@ -52,6 +54,16 @@ class RefundProcessorTest extends TestCase
 
     private EventRecorder&MockObject $eventRecorder;
 
+    /**
+     * @var PayloadValidator&MockObject
+     */
+    private PayloadValidator&MockObject $payloadValidator;
+
+    /**
+     * @var TimezoneInterface&MockObject
+     */
+    private TimezoneInterface&MockObject $timezone;
+
     private RefundProcessor $processor;
 
     protected function setUp(): void
@@ -62,6 +74,9 @@ class RefundProcessorTest extends TestCase
         $this->client = $this->createMock(ErpRefundClient::class);
         $this->stateMachine = $this->createMock(RefundStateMachine::class);
         $this->eventRecorder = $this->createMock(EventRecorder::class);
+        $this->payloadValidator = $this->createMock(PayloadValidator::class);
+        $this->timezone = $this->createMock(TimezoneInterface::class);
+        $this->timezone->method('date')->willReturn(new \DateTime('2026-11-12'));
 
         $this->processor = new RefundProcessor(
             $this->refundRepository,
@@ -83,8 +98,9 @@ class RefundProcessorTest extends TestCase
             $this->client,
             $this->payloadBuilder,
             $this->createMock(EventManagerInterface::class),
-            $this->createMock(TimezoneInterface::class),
-            $this->createMock(RefundEligibility::class)
+            $this->timezone,
+            $this->createMock(RefundEligibility::class),
+            $this->payloadValidator
         );
     }
 
@@ -251,5 +267,68 @@ class RefundProcessorTest extends TestCase
 
         $this->expectException(ErpTransientException::class);
         $this->processor->confirm(7, 3);
+    }
+
+    /**
+     * An invalid Create request is stopped locally, with no HTTP call, and dead-lettered.
+     */
+    public function testInvalidCreatePayloadIsNeverSentToTheErp(): void
+    {
+        $refund = $this->createMock(RefundInterface::class);
+        $refund->method('getStatus')->willReturn(RefundInterface::STATUS_CALCULATED);
+        $refund->method('getRefundNo')->willReturn('SR-20260907-000123');
+        $refund->method('getOrderId')->willReturn(100);
+
+        $this->refundRepository->method('getById')->with(7)->willReturn($refund);
+        $this->refundRepository->method('getItems')->with(7)->willReturn([]);
+        $this->orderRepository->method('get')->with(100)->willReturn(
+            $this->createMock(\Magento\Sales\Api\Data\OrderInterface::class)
+        );
+        $this->client->method('hasSucceededCreate')->willReturn(false);
+        $this->payloadBuilder->method('build')->willReturn(['lines' => [['quantity' => 0]]]);
+        $this->payloadValidator->method('validateCreate')->willThrowException(
+            new ValidationException(__('invalid'))
+        );
+
+        $this->client->expects(self::never())->method('create');
+        $this->stateMachine->expects(self::once())
+            ->method('setSubStatus')
+            ->with($refund, RefundInterface::CREATE_STATUS, RefundInterface::SUB_INVALID_PAYLOAD);
+
+        $this->expectException(ValidationException::class);
+        $this->processor->process(7);
+    }
+
+    /**
+     * BR-10: bad bank transaction input is refused before the refund is loaded.
+     *
+     * @dataProvider invalidCashRegistrationProvider
+     * @param string $number
+     * @param string $date
+     * @param string $message
+     */
+    public function testInvalidCashRegistrationIsRefused(string $number, string $date, string $message): void
+    {
+        $this->refundRepository->expects(self::never())->method('getById');
+
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage($message);
+        $this->processor->registerCashRefund(7, $number, $date, 1);
+    }
+
+    /**
+     * Invalid bank transaction inputs and the message each must produce.
+     *
+     * @return array
+     */
+    public static function invalidCashRegistrationProvider(): array
+    {
+        return [
+            'empty number' => ['  ', '2026-11-12', 'Enter the bank transaction number.'],
+            'number too long' => [str_repeat('9', 65), '2026-11-12', 'at most 64 characters'],
+            'not a date' => ['TXN-1', 'not-a-date', 'YYYY-MM-DD'],
+            'impossible date' => ['TXN-1', '2026-02-30', 'YYYY-MM-DD'],
+            'future date' => ['TXN-1', '2026-11-13', 'cannot be in the future'],
+        ];
     }
 }
