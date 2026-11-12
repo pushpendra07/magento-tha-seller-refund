@@ -20,11 +20,35 @@ abstract class DbTransactionTestCase extends AppTestCase
 {
     private AdapterInterface $connection;
 
+    /**
+     * Delivery offsets in days, as the seeder defines them (seed/fixtures/orders.json).
+     */
+    private const SEED_DELIVERED_OFFSET_DAYS = [
+        'SR-ORD-1001' => 5,
+        'SR-ORD-1002' => 5,
+        'SR-ORD-1003' => 6,
+        'SR-ORD-1004' => 20,
+        'SR-ORD-1005' => 5,
+        'SR-ORD-1006' => 4,
+    ];
+
     protected function setUp(): void
     {
         parent::setUp();
-        $this->connection = $this->get(ResourceConnection::class)->getConnection();
+        $resource = $this->get(ResourceConnection::class);
+        $this->connection = $resource->getConnection();
         $this->connection->beginTransaction();
+
+        // Seed delivery dates are relative to when the image was seeded, so on an older stack
+        // every order is outside the 14-day window (BR-02). Re-anchor them to now inside this
+        // transaction; tearDown() rolls the change back.
+        foreach (self::SEED_DELIVERED_OFFSET_DAYS as $incrementId => $days) {
+            $this->connection->update(
+                $resource->getTableName('sales_order'),
+                ['mp_delivered_at' => new \Zend_Db_Expr(sprintf('NOW() - INTERVAL %d DAY', $days))],
+                ['increment_id = ?' => $incrementId]
+            );
+        }
     }
 
     protected function tearDown(): void

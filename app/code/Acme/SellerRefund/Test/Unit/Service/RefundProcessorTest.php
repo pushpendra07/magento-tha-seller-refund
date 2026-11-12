@@ -13,6 +13,7 @@ use Acme\SellerRefund\Model\Erp\Exception\ErpTransientException;
 use Acme\SellerRefund\Model\Erp\PayloadBuilder;
 use Acme\SellerRefund\Model\Event\EventRecorder;
 use Acme\SellerRefund\Model\Outbox\Outbox;
+use Acme\SellerRefund\Model\RefundEligibility;
 use Acme\SellerRefund\Model\RefundFactory;
 use Acme\SellerRefund\Model\RefundItemFactory;
 use Acme\SellerRefund\Model\RefundNumberGenerator;
@@ -81,7 +82,8 @@ class RefundProcessorTest extends TestCase
             $this->client,
             $this->payloadBuilder,
             $this->createMock(EventManagerInterface::class),
-            $this->createMock(TimezoneInterface::class)
+            $this->createMock(TimezoneInterface::class),
+            $this->createMock(RefundEligibility::class)
         );
     }
 

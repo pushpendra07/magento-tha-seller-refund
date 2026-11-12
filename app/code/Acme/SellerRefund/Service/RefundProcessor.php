@@ -8,6 +8,7 @@ use Acme\SellerRefund\Api\Data\RefundEventInterface;
 use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\RefundRepositoryInterface;
 use Acme\SellerRefund\Exception\IllegalTransitionException;
+use Acme\SellerRefund\Exception\NotEligibleException;
 use Acme\SellerRefund\Model\Erp\ErpRefundClient;
 use Acme\SellerRefund\Model\Erp\Exception\ErpBusinessException;
 use Acme\SellerRefund\Model\Erp\Exception\ErpConflictException;
@@ -24,6 +25,7 @@ use Acme\SellerRefund\Model\ResourceModel\OrderLock;
 use Acme\SellerRefund\Model\ResourceModel\PriorRefundQuantity;
 use Acme\SellerRefund\Model\ResourceModel\Refund as RefundResource;
 use Acme\SellerRefund\Model\ResourceModel\RefundItem as RefundItemResource;
+use Acme\SellerRefund\Model\RefundEligibility;
 use Acme\SellerRefund\Model\SellerLineResolver;
 use Acme\SellerRefund\Model\Submission\RefundSubmission;
 use Acme\SellerRefund\Model\Total\RefundTotalCalculator;
@@ -58,7 +60,8 @@ class RefundProcessor
         private readonly ErpRefundClient $client,
         private readonly PayloadBuilder $payloadBuilder,
         private readonly EventManagerInterface $eventManager,
-        private readonly TimezoneInterface $timezone
+        private readonly TimezoneInterface $timezone,
+        private readonly RefundEligibility $eligibility
     ) {
     }
 
@@ -69,6 +72,16 @@ class RefundProcessor
         try {
             $this->orderLock->lock($orderId);
             $order = $this->orderRepository->get($orderId);
+
+            // BR-01/BR-02 are enforced here, under the order lock, not only by hiding the
+            // admin button: a direct request must not refund an expired or ineligible order.
+            $eligibility = $this->eligibility->check($order, $this->timezone->date());
+            if (!$eligibility->isEligible()) {
+                throw new NotEligibleException(
+                    __('This order cannot be refunded (%1).', implode(', ', $eligibility->getReasons()))
+                );
+            }
+
             $prior = $this->priorRefundQuantity->sumRefundedByOrderItem($orderId);
             $this->validator->validate($order, $submission, $prior);
 
