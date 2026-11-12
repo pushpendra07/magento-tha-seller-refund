@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Acme\SellerRefund\Block\Order;
 
 use Acme\SellerRefund\Api\RefundRepositoryInterface;
+use Acme\SellerRefund\Model\Presentation\CustomerVisibleRefunds;
 use Acme\SellerRefund\Model\Total\RefundTotalCalculator;
 use Magento\Framework\Registry;
 use Magento\Framework\View\Element\Template;
@@ -25,6 +26,7 @@ class RefundDetails extends Template
         private readonly RefundRepositoryInterface $refundRepository,
         private readonly OrderRepositoryInterface $orderRepository,
         private readonly RefundTotalCalculator $calculator,
+        private readonly CustomerVisibleRefunds $visibleRefunds,
         array $data = []
     ) {
         parent::__construct($context, $data);
@@ -48,7 +50,7 @@ class RefundDetails extends Template
         }
 
         $views = [];
-        foreach ($this->refundRepository->getByOrderId((int) $order->getEntityId()) as $refund) {
+        foreach ($this->visibleRefunds->forOrder((int) $order->getEntityId()) as $refund) {
             $items = $this->refundRepository->getItems((int) $refund->getEntityId());
             $views[] = [
                 'refund' => $refund,

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Acme\SellerRefund\ViewModel;
 
 use Acme\SellerRefund\Api\RefundRepositoryInterface;
+use Acme\SellerRefund\Model\Presentation\CustomerVisibleRefunds;
 use Acme\SellerRefund\Model\Total\RefundTotalCalculator;
 use Magento\Customer\Model\Session as CustomerSession;
 use Magento\Framework\View\Element\Block\ArgumentInterface;
@@ -23,7 +24,8 @@ class OrderHistoryRefunds implements ArgumentInterface
         private readonly OrderCollectionFactory $orderCollectionFactory,
         private readonly RefundRepositoryInterface $refundRepository,
         private readonly OrderRepositoryInterface $orderRepository,
-        private readonly RefundTotalCalculator $calculator
+        private readonly RefundTotalCalculator $calculator,
+        private readonly CustomerVisibleRefunds $visibleRefunds
     ) {
     }
 
@@ -43,7 +45,7 @@ class OrderHistoryRefunds implements ArgumentInterface
         $entries = [];
         foreach ($orders as $order) {
             $orderId = (int) $order->getEntityId();
-            $refunds = $this->refundRepository->getByOrderId($orderId);
+            $refunds = $this->visibleRefunds->forOrder($orderId);
             if ($refunds === []) {
                 continue;
             }

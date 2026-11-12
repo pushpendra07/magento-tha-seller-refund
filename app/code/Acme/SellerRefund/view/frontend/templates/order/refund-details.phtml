@@ -1,5 +1,6 @@
 <?php
 /** @var \Acme\SellerRefund\Block\Order\RefundDetails $block */
+/** @var \Magento\Framework\Escaper $escaper */
 $refundViews = $block->getRefundViews();
 ?>
 <?php if ($refundViews): ?>
@@ -20,8 +21,9 @@ $refundViews = $block->getRefundViews();
                     <span class="acme-order-refund__no"><?= $block->escapeHtml($refund->getRefundNo()) ?></span>
                 </h3>
 
-                <table class="data table acme-order-refund__preref">
-                    <caption class="table-caption"><?= $block->escapeHtml(__('Pre-refund Total')) ?></caption>
+                <h4 class="acme-order-refund__section-title"><?= $escaper->escapeHtml(__('Pre-refund Total')) ?></h4>
+                <table class="data table acme-order-refund__preref"
+                       aria-label="<?= $escaper->escapeHtmlAttr(__('Pre-refund Total')) ?>">
                     <tbody>
                         <tr><th><?= $block->escapeHtml(__('Product Subtotal')) ?></th><td><?= $block->escapeHtml($block->formatMoney($figures->preRefundSubtotal, $currency)) ?></td></tr>
                         <tr><th><?= $block->escapeHtml(__('Shipping')) ?></th><td><?= $block->escapeHtml($block->formatMoney($figures->preRefundShipping, $currency)) ?></td></tr>
@@ -30,8 +32,9 @@ $refundViews = $block->getRefundViews();
                     </tbody>
                 </table>
 
-                <table class="data table acme-order-refund__refund">
-                    <caption class="table-caption"><?= $block->escapeHtml(__('Refund')) ?></caption>
+                <h4 class="acme-order-refund__section-title"><?= $escaper->escapeHtml(__('Refund')) ?></h4>
+                <table class="data table acme-order-refund__refund"
+                       aria-label="<?= $escaper->escapeHtmlAttr(__('Refund')) ?>">
                     <tbody>
                         <tr><th><?= $block->escapeHtml(__('Refund Date')) ?></th><td><?= $block->escapeHtml($block->renderRefundDate($refund->getCreatedAt())) ?></td></tr>
                         <tr><th><?= $block->escapeHtml(__('Product Subtotal')) ?></th><td><?= $block->escapeHtml($block->formatMoney($figures->refundSubtotal, $currency)) ?></td></tr>
