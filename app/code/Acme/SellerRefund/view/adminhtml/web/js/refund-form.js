@@ -33,12 +33,19 @@ define([
             this._on(this.element.find(this.options.selectors.submit), {click: '_onSubmit'});
         },
 
-        /** @return {Object} order_item_id => requested qty */
+        /**
+         * Only lines the operator selected (qty above zero) are sent; untouched lines keep
+         * their default of 0 and must not reach the server as a zero-quantity refund line.
+         *
+         * @return {Object} order_item_id => requested qty
+         */
         _collectItems: function () {
             var items = {};
+
             this.element.find(this.options.selectors.qtyInput).each(function () {
                 var qty = $(this).val();
-                if (qty !== '' && qty !== null) {
+
+                if (qty !== '' && qty !== null && parseFloat(qty) > 0) {
                     items[$(this).data('orderItemId')] = qty;
                 }
             });
@@ -147,8 +154,9 @@ define([
                 state.text($t('Saved; ERP notification pending retry'));
             }
 
-            if (response.redirect_url) {
-                link.attr('href', response.redirect_url);
+            // BR-11: the receipt is available as soon as the server confirms the record exists.
+            if (response.receipt_url) {
+                link.attr('href', response.receipt_url);
                 link.prop('hidden', false);
             }
         },
