@@ -23,7 +23,8 @@ class ErpRefundClient
     public function __construct(
         private readonly CurlFactory $curlFactory,
         private readonly Config $config,
-        private readonly RefundResource $refundResource
+        private readonly RefundResource $refundResource,
+        private readonly CorrelationId $correlationId
     ) {
     }
 
@@ -33,7 +34,7 @@ class ErpRefundClient
     public function create(array $payload, int $attempt = 1): CreateResult
     {
         $refundNo = (string) ($payload['refund_no'] ?? '');
-        $curl = $this->newCurl($refundNo . ':' . $attempt);
+        $curl = $this->newCurl($this->correlationId->forCreate($refundNo, $attempt));
         $uri = $this->config->erpBaseUrl() . self::CREATE_PATH;
 
         $this->send($curl, $uri, $payload);
@@ -52,7 +53,7 @@ class ErpRefundClient
      */
     public function readStatus(string $erpId): array
     {
-        $curl = $this->newCurl($erpId . ':status');
+        $curl = $this->newCurl($this->correlationId->forStatusCheck($erpId));
         $uri = $this->config->erpBaseUrl() . self::CREATE_PATH . '/' . rawurlencode($erpId);
 
         try {
@@ -73,7 +74,7 @@ class ErpRefundClient
      */
     public function confirm(string $erpId, array $payload): array
     {
-        $curl = $this->newCurl($erpId . ':confirm');
+        $curl = $this->newCurl($this->correlationId->forConfirm($erpId));
         $uri = $this->config->erpBaseUrl() . self::CREATE_PATH . '/' . rawurlencode($erpId) . '/confirm';
 
         $this->send($curl, $uri, $payload);

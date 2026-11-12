@@ -298,7 +298,15 @@ $hasActions = $block->canRegisterCashRefund() || $block->canRetry() || $block->c
                         </td>
                         <td><?= $escaper->escapeHtml($block->humanize($event->getApiCode())) ?></td>
                         <td><?= $escaper->escapeHtml($event->getAttemptNo()) ?></td>
-                        <td><?= $escaper->escapeHtml($event->getErrorCode()) ?></td>
+                        <td>
+                            <?= $escaper->escapeHtml($event->getErrorCode()) ?>
+                            <?php $correlationId = $block->getErrorCorrelationId($event); ?>
+                            <?php if ($correlationId !== null): ?>
+                                <div class="acme-refund-correlation">
+                                    <?= $escaper->escapeHtml(__('Ref: %1', $correlationId)) ?>
+                                </div>
+                            <?php endif; ?>
+                        </td>
                         <?php if ($canSeeRaw): ?>
                             <td>
                                 <?php if ($request !== '' || $response !== ''): ?>

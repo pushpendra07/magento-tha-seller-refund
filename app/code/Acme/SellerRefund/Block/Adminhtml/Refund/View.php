@@ -7,6 +7,7 @@ namespace Acme\SellerRefund\Block\Adminhtml\Refund;
 use Acme\SellerRefund\Api\Data\RefundEventInterface;
 use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\RefundRepositoryInterface;
+use Acme\SellerRefund\Model\Erp\CorrelationId;
 use Acme\SellerRefund\Model\RefundStateMachine;
 use Acme\SellerRefund\Model\Source\RefundReason;
 use Acme\SellerRefund\Model\Source\RefundStatus;
@@ -59,6 +60,7 @@ class View extends Template
         private readonly RefundReason $refundReason,
         private readonly RefundStatus $refundStatus,
         private readonly RefundSubStatus $refundSubStatus,
+        private readonly CorrelationId $correlationId,
         array $data = []
     ) {
         parent::__construct($context, $data);
@@ -239,6 +241,29 @@ class View extends Template
         return $this->eventCollectionFactory->create()
             ->addRefundFilter($this->getRefundId())
             ->getItems();
+    }
+
+    /**
+     * Correlation id of a failed ERP call, as sent in X-Correlation-Id (FRD 14).
+     *
+     * Shown only next to an integration error, so the operator can quote it to the ERP team.
+     *
+     * @param RefundEventInterface $event
+     * @return string|null
+     */
+    public function getErrorCorrelationId(RefundEventInterface $event): ?string
+    {
+        if ((string) $event->getErrorCode() === '') {
+            return null;
+        }
+        $refund = $this->getRefund();
+
+        return $this->correlationId->forApiCall(
+            $event->getApiCode(),
+            (string) $refund->getRefundNo(),
+            $refund->getErpRefundId(),
+            (int) $event->getAttemptNo()
+        );
     }
 
     public function canSeeRawPayload(): bool
