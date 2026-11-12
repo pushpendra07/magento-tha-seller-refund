@@ -101,13 +101,20 @@ class RefundStateMachine
         $this->applyCas($refund, [$field => $value]);
     }
 
+    /**
+     * A refund may be voided only before any Create Refund attempt (BR-09).
+     *
+     * Once Create has been attempted the ERP may hold a credit note, and there is no ERP void
+     * operation. Cancelling then would leave that credit note open while the quantity is
+     * released for another refund.
+     *
+     * @param RefundInterface $refund
+     * @return bool
+     */
     public function canCancel(RefundInterface $refund): bool
     {
-        return in_array(
-            $refund->getStatus(),
-            [RefundInterface::STATUS_CALCULATED, RefundInterface::STATUS_CASH_REFUND_PENDING],
-            true
-        );
+        return $refund->getStatus() === RefundInterface::STATUS_CALCULATED
+            && $refund->getCreateStatus() === RefundInterface::SUB_NOT_STARTED;
     }
 
     private function isLegal(string $from, string $to): bool
