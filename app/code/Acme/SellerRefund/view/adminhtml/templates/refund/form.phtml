@@ -1,5 +1,6 @@
 <?php
 /** @var \Acme\SellerRefund\Block\Adminhtml\Refund\Form $block */
+/** @var \Magento\Framework\Escaper $escaper */
 $lines = $block->getSellerLines();
 $config = $block->getJsConfig();
 $currency = $config['currency'];
@@ -12,9 +13,11 @@ $currency = $config['currency'];
         <label class="admin__field-label" for="acme-refund-reason"><?= $block->escapeHtml(__('Reason')) ?></label>
         <div class="admin__field-control">
             <select id="acme-refund-reason" data-role="reason" name="reason_code">
-                <option value="damaged"><?= $block->escapeHtml(__('Damaged')) ?></option>
-                <option value="wrong_item"><?= $block->escapeHtml(__('Wrong item')) ?></option>
-                <option value="customer_request"><?= $block->escapeHtml(__('Customer request')) ?></option>
+                <?php foreach ($block->getReasonOptions() as $option): ?>
+                    <option value="<?= $escaper->escapeHtmlAttr($option['value']) ?>">
+                        <?= $escaper->escapeHtml($option['label']) ?>
+                    </option>
+                <?php endforeach; ?>
             </select>
         </div>
     </div>

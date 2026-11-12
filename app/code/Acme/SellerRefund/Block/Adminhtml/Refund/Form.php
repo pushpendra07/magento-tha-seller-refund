@@ -6,6 +6,7 @@ namespace Acme\SellerRefund\Block\Adminhtml\Refund;
 
 use Acme\SellerRefund\Model\ResourceModel\PriorRefundQuantity;
 use Acme\SellerRefund\Model\SellerLineResolver;
+use Acme\SellerRefund\Model\Source\RefundReason;
 use Acme\SellerRefund\Model\Tax\TaxCodeResolver;
 use Magento\Backend\Block\Template;
 use Magento\Backend\Block\Template\Context;
@@ -28,6 +29,7 @@ class Form extends Template
         private readonly PriorRefundQuantity $priorRefundQuantity,
         private readonly TaxCodeResolver $taxCodeResolver,
         private readonly FormKey $formKeyProvider,
+        private readonly RefundReason $refundReason,
         array $data = []
     ) {
         parent::__construct($context, $data);
@@ -76,6 +78,16 @@ class Form extends Template
         }
 
         return $lines;
+    }
+
+    /**
+     * Reason options for the entry form, from the same source the server validates against.
+     *
+     * @return array<int, array{value: string, label: \Magento\Framework\Phrase}>
+     */
+    public function getReasonOptions(): array
+    {
+        return $this->refundReason->toOptionArray();
     }
 
     /**

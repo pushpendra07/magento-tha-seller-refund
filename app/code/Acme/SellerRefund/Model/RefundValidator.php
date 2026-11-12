@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Acme\SellerRefund\Model;
 
 use Acme\SellerRefund\Exception\ValidationException;
+use Acme\SellerRefund\Model\Source\RefundReason;
 use Acme\SellerRefund\Model\Submission\RefundSubmission;
 use Magento\Sales\Api\Data\OrderInterface;
 
@@ -14,13 +15,7 @@ use Magento\Sales\Api\Data\OrderInterface;
  */
 class RefundValidator
 {
-    public const ALLOWED_REASONS = [
-        'defect',
-        'shortage',
-        'customer_return',
-        'price_adjustment',
-        'other',
-    ];
+    public const ALLOWED_REASONS = RefundReason::CODES;
 
     public function __construct(
         private readonly SellerLineResolver $sellerLineResolver
