@@ -98,7 +98,7 @@ class RefundTotalCalculatorTest extends TestCase
     {
         $lines = [1 => $this->item(1200.0, 2.0, 101, 'SELLER-RED-01', 'Seller Red Widget')];
         $figures = $this->calculator($lines)->fromSelection(
-            $this->order('500.0000'),
+            $this->order('500.0000', '2400.0000'),
             [1 => '2'],
             [],
             new DateTimeImmutable()
@@ -118,7 +118,7 @@ class RefundTotalCalculatorTest extends TestCase
     {
         $lines = [1 => $this->item(1200.0, 5.0, 101, 'SELLER-RED-01', 'Seller Red Widget')];
         $figures = $this->calculator($lines)->fromSelection(
-            $this->order('500.0000'),
+            $this->order('500.0000', '2400.0000'),
             [1 => '2'],
             [],
             new DateTimeImmutable()
@@ -159,6 +159,30 @@ class RefundTotalCalculatorTest extends TestCase
     }
 
     /**
+     * FRD section 11: a mixed order's shipping also covers the first-party line, so a full
+     * seller refund gets only the seller share. Seller rows 1200 + 1600 = 2800 of an order
+     * subtotal of 4800 (core item 2000); shipping 480, so the seller share is 280, not 480.
+     */
+    public function testMixedOrderFullRefundGetsOnlyTheSellerShippingShare(): void
+    {
+        $lines = [
+            1 => $this->item(1200.0, 1.0, 101, 'SELLER-RED-01', 'Seller Red Widget'),
+            2 => $this->item(800.0, 2.0, 102, 'SELLER-BLU-02', 'Seller Blue Gadget'),
+        ];
+
+        $figures = $this->calculator($lines)->fromSelection(
+            $this->order('480.0000', '4800.0000'),
+            [1 => '1', 2 => '2'],
+            [],
+            new DateTimeImmutable()
+        );
+
+        self::assertFalse($figures->isPartial());
+        self::assertSame('280.0000', $figures->refundShipping);
+        self::assertSame('280.0000', $figures->preRefundShipping);
+    }
+
+    /**
      * @param array<int, OrderItem&MockObject> $sellerLines
      */
     private function calculator(array $sellerLines): RefundTotalCalculator
@@ -185,10 +209,11 @@ class RefundTotalCalculatorTest extends TestCase
         return $item;
     }
 
-    private function order(string $shippingAmount): OrderInterface&MockObject
+    private function order(string $shippingAmount, string $subtotal = '0.0000'): OrderInterface&MockObject
     {
         $order = $this->createMock(OrderInterface::class);
         $order->method('getShippingAmount')->willReturn((float) $shippingAmount);
+        $order->method('getSubtotal')->willReturn((float) $subtotal);
         $order->method('getOrderCurrencyCode')->willReturn('JPY');
 
         return $order;

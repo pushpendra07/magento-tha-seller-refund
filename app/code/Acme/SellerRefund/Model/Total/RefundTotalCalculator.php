@@ -61,7 +61,7 @@ class RefundTotalCalculator
             $rowAmounts[$orderItemId] = bcmul($unitPrice, $qty, self::SCALE);
         }
 
-        $refundShipping = $partial ? self::ZERO : $this->sellerShippingBase($order);
+        $refundShipping = $partial ? self::ZERO : $this->sellerShippingBase($order, $sellerLines);
         $shippingShares = $this->allocate($refundShipping, $rowAmounts);
 
         $lines = [];
@@ -172,7 +172,7 @@ class RefundTotalCalculator
             );
         }
 
-        $shipping = $this->sellerShippingBase($order);
+        $shipping = $this->sellerShippingBase($order, $sellerLines);
         $shippingShares = $this->allocate($shipping, $rowAmounts);
 
         $subtotal = self::ZERO;
@@ -215,9 +215,41 @@ class RefundTotalCalculator
         return true;
     }
 
-    private function sellerShippingBase(OrderInterface $order): string
+    /**
+     * Seller share of the order's shipping (FRD section 11).
+     *
+     * The order stores one shipping amount for all lines. On a mixed order that amount also
+     * covers first-party items, so the seller share is shipping x seller ex-tax rows / order
+     * subtotal. It never exceeds the order's shipping and is zero when it cannot be derived.
+     *
+     * @param OrderInterface $order
+     * @param array<int, \Magento\Sales\Api\Data\OrderItemInterface> $sellerLines
+     * @return string
+     */
+    private function sellerShippingBase(OrderInterface $order, array $sellerLines): string
     {
-        return $this->num($order->getShippingAmount());
+        $orderShipping = $this->num($order->getShippingAmount());
+        $orderSubtotal = $this->num($order->getSubtotal());
+        if (bccomp($orderShipping, self::ZERO, self::SCALE) <= 0
+            || bccomp($orderSubtotal, self::ZERO, self::SCALE) <= 0
+        ) {
+            return self::ZERO;
+        }
+
+        $sellerSubtotal = self::ZERO;
+        foreach ($sellerLines as $item) {
+            $sellerSubtotal = bcadd(
+                $sellerSubtotal,
+                bcmul($this->num($item->getPrice()), $this->num($item->getQtyOrdered()), self::SCALE),
+                self::SCALE
+            );
+        }
+
+        if (bccomp($sellerSubtotal, $orderSubtotal, self::SCALE) >= 0) {
+            return $orderShipping;
+        }
+
+        return bcdiv(bcmul($orderShipping, $sellerSubtotal, 8), $orderSubtotal, self::SCALE);
     }
 
     private function currency(OrderInterface $order): string
