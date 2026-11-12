@@ -57,15 +57,19 @@ class RefundValidator
                 );
             }
 
+            // BR-03: the cap is what is still refundable, not what was ordered. The prior
+            // quantities are read by the caller under the order lock.
             $qtyOrdered = (string) $sellerLines[$orderItemId]->getQtyOrdered();
+            $qtyRefundedBefore = (string) ($priorRefundedByItem[$orderItemId] ?? '0');
+            $qtyRemaining = bcsub($qtyOrdered, $qtyRefundedBefore, 4);
 
-            if (bccomp($qty, $qtyOrdered, 4) === 1) {
+            if (bccomp($qty, $qtyRemaining, 4) === 1) {
                 throw new ValidationException(
                     __(
-                        'The refund quantity %1 for order item %2 exceeds the ordered quantity %3.',
+                        'The refund quantity %1 for order item %2 exceeds the remaining refundable quantity %3.',
                         $qty,
                         $orderItemId,
-                        $qtyOrdered
+                        $qtyRemaining
                     )
                 );
             }

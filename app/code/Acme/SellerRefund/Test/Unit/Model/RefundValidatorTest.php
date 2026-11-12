@@ -63,6 +63,38 @@ class RefundValidatorTest extends TestCase
         $this->validator->validate($this->order, $submission, [5 => '0']);
     }
 
+    /**
+     * BR-03: a request within the ordered quantity but above what is still refundable is
+     * rejected. 3 ordered, 2 already refunded, 2 requested: only 1 remains.
+     */
+    public function testQuantityExceedingRemainingAfterPriorRefundsIsRejected(): void
+    {
+        $this->sellerLineResolver->method('sellerLines')->willReturn([
+            5 => $this->orderItem('3'),
+        ]);
+
+        $submission = new RefundSubmission('defect', [5 => '2']);
+
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('exceeds the remaining refundable quantity');
+        $this->validator->validate($this->order, $submission, [5 => '2']);
+    }
+
+    /**
+     * A line that has already been refunded in full cannot be refunded again.
+     */
+    public function testFullyRefundedLineIsRejected(): void
+    {
+        $this->sellerLineResolver->method('sellerLines')->willReturn([
+            5 => $this->orderItem('2'),
+        ]);
+
+        $submission = new RefundSubmission('defect', [5 => '1']);
+
+        $this->expectException(ValidationException::class);
+        $this->validator->validate($this->order, $submission, [5 => '2']);
+    }
+
     public function testZeroQuantityIsRejected(): void
     {
         $this->sellerLineResolver->method('sellerLines')->willReturn([
