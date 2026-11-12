@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Acme\SellerRefund\Test\Unit\Model\Total;
 
 use Acme\SellerRefund\Model\SellerLineResolver;
+use Acme\SellerRefund\Model\Tax\LineTaxRate;
 use Acme\SellerRefund\Model\Tax\TaxCodeResolver;
 use Acme\SellerRefund\Model\Total\RefundTotalCalculator;
 use DateTimeImmutable;
@@ -183,13 +184,38 @@ class RefundTotalCalculatorTest extends TestCase
     }
 
     /**
+     * FRD section 11: the refund uses the rate the original order actually charged. Here the
+     * product's tax class is 10%, but the order line was charged 0% (the store had no tax rule),
+     * so refunding 10% would pay the customer tax they never paid.
+     */
+    public function testRefundUsesTheTaxRateTheOrderActuallyCharged(): void
+    {
+        $lines = [1 => $this->item(1200.0, 1.0, 101, 'SELLER-RED-01', 'Seller Red Widget', 0.0)];
+
+        $figures = $this->calculator($lines)->fromSelection(
+            $this->order('0.0000', '1200.0000'),
+            [1 => '1'],
+            [],
+            new DateTimeImmutable()
+        );
+
+        self::assertSame('0.0000', $figures->refundTax);
+        self::assertSame('1200.0000', $figures->refundGrandTotal);
+        self::assertSame('010', $figures->lines[0]->taxCode, 'The ERP still receives the business tax code.');
+    }
+
+    /**
      * @param array<int, OrderItem&MockObject> $sellerLines
      */
     private function calculator(array $sellerLines): RefundTotalCalculator
     {
         $this->sellerLineResolver->method('sellerLines')->willReturn($sellerLines);
 
-        return new RefundTotalCalculator($this->sellerLineResolver, $this->taxCodeResolver);
+        return new RefundTotalCalculator(
+            $this->sellerLineResolver,
+            $this->taxCodeResolver,
+            new LineTaxRate($this->taxCodeResolver)
+        );
     }
 
     private function item(
@@ -197,9 +223,11 @@ class RefundTotalCalculatorTest extends TestCase
         float $qtyOrdered,
         int $taxClassOptionId,
         string $sku,
-        string $name
+        string $name,
+        ?float $chargedTaxPercent = null
     ): OrderItem&MockObject {
         $item = $this->createMock(OrderItem::class);
+        $item->method('getTaxPercent')->willReturn($chargedTaxPercent);
         $item->method('getPrice')->willReturn($price);
         $item->method('getQtyOrdered')->willReturn($qtyOrdered);
         $item->method('getData')->willReturn($taxClassOptionId);

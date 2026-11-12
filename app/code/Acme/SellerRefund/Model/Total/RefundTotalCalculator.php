@@ -7,6 +7,7 @@ namespace Acme\SellerRefund\Model\Total;
 use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\Data\RefundItemInterface;
 use Acme\SellerRefund\Model\SellerLineResolver;
+use Acme\SellerRefund\Model\Tax\LineTaxRate;
 use Acme\SellerRefund\Model\Tax\TaxCodeResolver;
 use DateTimeInterface;
 use Magento\Sales\Api\Data\OrderInterface;
@@ -28,7 +29,8 @@ class RefundTotalCalculator
 
     public function __construct(
         private readonly SellerLineResolver $sellerLineResolver,
-        private readonly TaxCodeResolver $taxCodeResolver
+        private readonly TaxCodeResolver $taxCodeResolver,
+        private readonly LineTaxRate $lineTaxRate
     ) {
     }
 
@@ -71,7 +73,7 @@ class RefundTotalCalculator
             $rowAmount = $rowAmounts[$orderItemId];
             $shipping = $shippingShares[$orderItemId] ?? self::ZERO;
             $code = $this->taxCodeResolver->toBusinessCode((int) $item->getData('mp_tax_class'));
-            $rate = $this->taxCodeResolver->rateFor($code);
+            $rate = $this->lineTaxRate->forItem($item);
             $taxable = bcadd($rowAmount, $shipping, self::SCALE);
             $taxAmount = bcmul($taxable, $rate, self::SCALE);
             $grandTotal = bcadd($taxable, $taxAmount, self::SCALE);
@@ -181,7 +183,7 @@ class RefundTotalCalculator
             $rowAmount = $rowAmounts[$orderItemId];
             $share = $shippingShares[$orderItemId] ?? self::ZERO;
             $code = $this->taxCodeResolver->toBusinessCode((int) $item->getData('mp_tax_class'));
-            $rate = $this->taxCodeResolver->rateFor($code);
+            $rate = $this->lineTaxRate->forItem($item);
             $subtotal = bcadd($subtotal, $rowAmount, self::SCALE);
             $tax = bcadd($tax, bcmul(bcadd($rowAmount, $share, self::SCALE), $rate, self::SCALE), self::SCALE);
         }

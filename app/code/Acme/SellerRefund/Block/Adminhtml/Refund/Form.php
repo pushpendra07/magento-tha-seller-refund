@@ -7,6 +7,7 @@ namespace Acme\SellerRefund\Block\Adminhtml\Refund;
 use Acme\SellerRefund\Model\ResourceModel\PriorRefundQuantity;
 use Acme\SellerRefund\Model\SellerLineResolver;
 use Acme\SellerRefund\Model\Source\RefundReason;
+use Acme\SellerRefund\Model\Tax\LineTaxRate;
 use Acme\SellerRefund\Model\Tax\TaxCodeResolver;
 use Magento\Backend\Block\Template;
 use Magento\Backend\Block\Template\Context;
@@ -28,6 +29,7 @@ class Form extends Template
         private readonly SellerLineResolver $sellerLineResolver,
         private readonly PriorRefundQuantity $priorRefundQuantity,
         private readonly TaxCodeResolver $taxCodeResolver,
+        private readonly LineTaxRate $lineTaxRate,
         private readonly FormKey $formKeyProvider,
         private readonly RefundReason $refundReason,
         array $data = []
@@ -73,7 +75,7 @@ class Form extends Template
                 'qty_remaining' => $remaining,
                 'unit_price' => sprintf('%.4F', (float) $item->getPrice()),
                 'tax_code' => $code,
-                'tax_rate' => $this->taxCodeResolver->rateFor($code),
+                'tax_rate' => $this->lineTaxRate->forItem($item),
             ];
         }
 
