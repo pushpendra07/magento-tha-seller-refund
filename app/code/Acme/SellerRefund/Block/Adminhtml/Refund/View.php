@@ -9,6 +9,8 @@ use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\RefundRepositoryInterface;
 use Acme\SellerRefund\Model\RefundStateMachine;
 use Acme\SellerRefund\Model\Source\RefundReason;
+use Acme\SellerRefund\Model\Source\RefundStatus;
+use Acme\SellerRefund\Model\Source\RefundSubStatus;
 use Acme\SellerRefund\Model\ResourceModel\RefundEvent\CollectionFactory as EventCollectionFactory;
 use Acme\SellerRefund\Model\Total\RefundFigures;
 use Acme\SellerRefund\Model\Total\RefundTotalCalculator;
@@ -25,33 +27,6 @@ use Magento\Sales\Api\OrderRepositoryInterface;
  */
 class View extends Template
 {
-    /**
-     * Operator-facing labels for the main lifecycle status (FRD section 7).
-     */
-    private const STATUS_LABELS = [
-        RefundInterface::STATUS_DRAFT => 'Draft',
-        RefundInterface::STATUS_CALCULATED => 'Saved, waiting for the ERP',
-        RefundInterface::STATUS_CASH_REFUND_PENDING => 'Waiting for the cash refund',
-        RefundInterface::STATUS_CASH_REFUNDED => 'Cash refunded, confirming with the ERP',
-        RefundInterface::STATUS_ERP_CONFIRM_PENDING => 'Confirming with the ERP',
-        RefundInterface::STATUS_ERP_CONFIRMED => 'Completed',
-        RefundInterface::STATUS_FAILED => 'Rejected by the ERP',
-        RefundInterface::STATUS_CANCELLED => 'Cancelled',
-    ];
-
-    /**
-     * Operator-facing labels for the per-operation sub-statuses.
-     */
-    private const SUB_STATUS_LABELS = [
-        RefundInterface::SUB_NOT_STARTED => 'Not started',
-        RefundInterface::SUB_PENDING => 'In progress',
-        RefundInterface::SUB_SUCCEEDED => 'Succeeded',
-        RefundInterface::SUB_RETRYABLE_ERROR => 'Retrying',
-        RefundInterface::SUB_BUSINESS_REJECTED => 'Rejected',
-        RefundInterface::SUB_CONFLICT => 'Conflict, needs reconciliation',
-        RefundInterface::SUB_INVALID_PAYLOAD => 'Invalid data, not sent',
-    ];
-
     /**
      * Magento admin grid severity classes, so status reads at a glance.
      */
@@ -82,6 +57,8 @@ class View extends Template
         private readonly AuthorizationInterface $authorization,
         private readonly RefundStateMachine $stateMachine,
         private readonly RefundReason $refundReason,
+        private readonly RefundStatus $refundStatus,
+        private readonly RefundSubStatus $refundSubStatus,
         array $data = []
     ) {
         parent::__construct($context, $data);
@@ -142,9 +119,12 @@ class View extends Template
     public function getStatusLabel(?string $code): string
     {
         $code = (string) $code;
-        $label = self::STATUS_LABELS[$code] ?? self::SUB_STATUS_LABELS[$code] ?? $this->humanize($code);
+        $main = $this->refundStatus->getLabel($code);
+        if ($main !== null) {
+            return $main;
+        }
 
-        return (string) __($label);
+        return $this->refundSubStatus->getLabel($code) ?? $this->humanize($code);
     }
 
     /**
