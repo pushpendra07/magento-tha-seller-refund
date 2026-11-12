@@ -156,6 +156,26 @@ class Outbox
         );
     }
 
+    /**
+     * Whether a job for this refund and operation was dead-lettered and awaits operator replay.
+     *
+     * @param int $refundId
+     * @param string $op
+     * @return bool
+     */
+    public function hasDead(int $refundId, string $op): bool
+    {
+        $connection = $this->connection();
+        $select = $connection->select()
+            ->from($this->table(), ['entity_id'])
+            ->where('refund_id = ?', $refundId)
+            ->where('operation = ?', $op)
+            ->where('state = ?', self::STATE_DEAD)
+            ->limit(1);
+
+        return (bool) $connection->fetchOne($select);
+    }
+
     public function hasPending(int $refundId): bool
     {
         $connection = $this->connection();

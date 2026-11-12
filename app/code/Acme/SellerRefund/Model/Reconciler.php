@@ -33,7 +33,11 @@ class Reconciler
         $enqueued = 0;
         foreach ($collection as $refund) {
             $refundId = (int) $refund->getEntityId();
-            if (!$this->outbox->hasPending($refundId)) {
+            // A dead-lettered check waits for an operator replay; re-queueing it here would retry
+            // a permanently failing call forever.
+            if (!$this->outbox->hasPending($refundId)
+                && !$this->outbox->hasDead($refundId, Outbox::OP_STATUS_CHECK)
+            ) {
                 $this->outbox->enqueue($refundId, Outbox::OP_STATUS_CHECK);
                 $enqueued++;
             }
