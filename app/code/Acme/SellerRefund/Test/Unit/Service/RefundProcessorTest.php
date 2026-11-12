@@ -8,6 +8,7 @@ use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\RefundRepositoryInterface;
 use Acme\SellerRefund\Model\Erp\CreateResult;
 use Acme\SellerRefund\Model\Erp\ErpRefundClient;
+use Acme\SellerRefund\Model\Erp\Exception\ErpBusinessException;
 use Acme\SellerRefund\Model\Erp\Exception\ErpConflictException;
 use Acme\SellerRefund\Model\Erp\Exception\ErpTransientException;
 use Acme\SellerRefund\Model\Erp\PayloadBuilder;
@@ -200,6 +201,28 @@ class RefundProcessorTest extends TestCase
         $this->stateMachine->expects(self::never())->method('transition');
 
         $this->processor->process(7);
+    }
+
+    /**
+     * Read-before-confirm: when the ERP no longer reports the credit note as refund-pending
+     * (here it is already confirmed), the refund must not advance to erp_confirm_pending.
+     */
+    public function testStatusCheckRefusesACreditNoteThatIsNotPending(): void
+    {
+        $refund = $this->createMock(RefundInterface::class);
+        $refund->method('getStatus')->willReturn(RefundInterface::STATUS_CASH_REFUNDED);
+        $refund->method('getErpRefundId')->willReturn('ERP-8000123');
+
+        $this->refundRepository->method('getById')->with(7)->willReturn($refund);
+        $this->client->method('readStatus')->willReturn([
+            'erp_refund_id' => 'ERP-8000123',
+            'status' => 'refund-confirmed',
+        ]);
+
+        $this->stateMachine->expects(self::never())->method('transition');
+
+        $this->expectException(ErpBusinessException::class);
+        $this->processor->checkStatus(7);
     }
 
     /**

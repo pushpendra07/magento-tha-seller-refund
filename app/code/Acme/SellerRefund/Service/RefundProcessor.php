@@ -40,6 +40,11 @@ use Magento\Sales\Api\OrderRepositoryInterface;
  */
 class RefundProcessor
 {
+    /**
+     * ERP credit-note state that may be confirmed (FRD section 9.2).
+     */
+    private const ERP_STATUS_PENDING = 'refund-pending';
+
     public function __construct(
         private readonly RefundRepositoryInterface $refundRepository,
         private readonly ResourceConnection $resource,
@@ -246,6 +251,32 @@ class RefundProcessor
                 'error_code' => (string) $e->getHttpCode(),
             ]);
             throw $e;
+        }
+
+        // Read-before-confirm (FRD sections 3 and 9.2): confirm only a credit note the ERP still
+        // shows as refund-pending. Anything else needs a person, so the job is dead-lettered.
+        $erpStatus = (string) ($response['status'] ?? '');
+        if ($erpStatus !== self::ERP_STATUS_PENDING) {
+            $this->stateMachine->setSubStatus(
+                $refund,
+                RefundInterface::STATUS_CHECK_STATUS,
+                RefundInterface::SUB_BUSINESS_REJECTED
+            );
+            $this->eventRecorder->record(
+                $refundId,
+                RefundEventInterface::TYPE_ERP_STATUS,
+                RefundInterface::SUB_BUSINESS_REJECTED,
+                [
+                    'api_code' => 'status',
+                    'attempt_no' => $attemptNo,
+                    'error_code' => 'unexpected_status',
+                    'response_payload' => $response,
+                ]
+            );
+            throw new ErpBusinessException(
+                sprintf('The ERP reports credit note %s as "%s", not refund-pending.', $erpId, $erpStatus),
+                'unexpected_status'
+            );
         }
 
         $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_STATUS, RefundInterface::SUB_SUCCEEDED, [
