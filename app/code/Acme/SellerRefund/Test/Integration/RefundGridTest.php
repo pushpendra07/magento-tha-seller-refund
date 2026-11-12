@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Acme\SellerRefund\Test\Integration;
 
 use Acme\SellerRefund\Api\Data\RefundInterface;
+use Acme\SellerRefund\Model\Outbox\Outbox;
 use Acme\SellerRefund\Test\Integration\Framework\DbTransactionTestCase;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\Data\Collection\AbstractDb;
@@ -61,6 +62,46 @@ class RefundGridTest extends DbTransactionTestCase
     }
 
     /**
+     * FRD 10.2: the worklist surfaces integration state. A refund whose ERP call will not succeed
+     * on its own is flagged; one the outbox is still retrying, or that was replayed, is not.
+     */
+    public function testNeedsAttentionFlagsOnlyRefundsAnOperatorMustHandle(): void
+    {
+        [$rejected, $deadJob, $replayed, $retrying] = $this->addRefunds(4);
+        $refunds = $this->get(ResourceConnection::class)->getTableName('mp_refund');
+        $outbox = $this->get(ResourceConnection::class)->getTableName('mp_refund_outbox');
+        $db = $this->connection();
+        foreach ([$rejected, $deadJob, $replayed, $retrying] as $id) {
+            $db->update($refunds, [
+                'create_status' => RefundInterface::SUB_SUCCEEDED,
+                'status_check_status' => RefundInterface::SUB_NOT_STARTED,
+                'confirm_status' => RefundInterface::SUB_NOT_STARTED,
+            ], ['entity_id = ?' => $id]);
+        }
+        $db->update(
+            $refunds,
+            ['status_check_status' => RefundInterface::SUB_BUSINESS_REJECTED],
+            ['entity_id = ?' => $rejected]
+        );
+        $db->update(
+            $refunds,
+            ['status_check_status' => RefundInterface::SUB_RETRYABLE_ERROR],
+            ['entity_id = ?' => $retrying]
+        );
+        $job = ['operation' => Outbox::OP_STATUS_CHECK, 'attempts' => 8, 'available_at' => '2026-01-01 00:00:00'];
+        $db->insert($outbox, $job + ['refund_id' => $deadJob, 'state' => Outbox::STATE_DEAD]);
+        $db->insert($outbox, $job + ['refund_id' => $replayed, 'state' => Outbox::STATE_DEAD]);
+        $db->insert($outbox, $job + ['refund_id' => $replayed, 'state' => Outbox::STATE_PENDING]);
+
+        $flagged = $this->grid()->addFieldToFilter('needs_attention', '1')->getAllIds();
+
+        self::assertContains((string) $rejected, $flagged, 'A business reject needs an operator.');
+        self::assertContains((string) $deadJob, $flagged, 'A dead-lettered job needs an operator.');
+        self::assertNotContains((string) $replayed, $flagged, 'A replayed job is back in the queue.');
+        self::assertNotContains((string) $retrying, $flagged, 'The outbox is still retrying this one.');
+    }
+
+    /**
      * A fresh grid collection, as the admin grid's data provider builds it.
      *
      * @return AbstractDb
@@ -74,9 +115,9 @@ class RefundGridTest extends DbTransactionTestCase
      * Copy an existing refund row with new numbers; the test transaction rolls them back.
      *
      * @param int $count
-     * @return void
+     * @return int[] the new refund ids
      */
-    private function addRefunds(int $count): void
+    private function addRefunds(int $count): array
     {
         $table = $this->get(ResourceConnection::class)->getTableName('mp_refund');
         $template = $this->connection()->fetchRow(
@@ -85,10 +126,14 @@ class RefundGridTest extends DbTransactionTestCase
         self::assertNotEmpty($template, 'The seed refunds are missing.');
         unset($template['entity_id']);
 
+        $ids = [];
         for ($i = 1; $i <= $count; $i++) {
             $row = $template;
             $row['refund_no'] = sprintf('SR-TEST-%06d', $i);
             $this->connection()->insert($table, $row);
+            $ids[] = (int) $this->connection()->lastInsertId($table);
         }
+
+        return $ids;
     }
 }

@@ -78,6 +78,30 @@
                 <label translate="true">ERP Create</label>
             </settings>
         </column>
+        <column name="status_check_status" component="Magento_Ui/js/grid/columns/select" sortOrder="52">
+            <settings>
+                <options class="Acme\SellerRefund\Model\Source\RefundSubStatus"/>
+                <filter>select</filter>
+                <dataType>select</dataType>
+                <label translate="true">ERP Status Check</label>
+            </settings>
+        </column>
+        <column name="confirm_status" component="Magento_Ui/js/grid/columns/select" sortOrder="54">
+            <settings>
+                <options class="Acme\SellerRefund\Model\Source\RefundSubStatus"/>
+                <filter>select</filter>
+                <dataType>select</dataType>
+                <label translate="true">ERP Confirm</label>
+            </settings>
+        </column>
+        <column name="needs_attention" component="Magento_Ui/js/grid/columns/select" sortOrder="56">
+            <settings>
+                <options class="Magento\Config\Model\Config\Source\Yesno"/>
+                <filter>select</filter>
+                <dataType>select</dataType>
+                <label translate="true">Needs Attention</label>
+            </settings>
+        </column>
         <column name="refund_type" sortOrder="60">
             <settings>
                 <filter>text</filter>
