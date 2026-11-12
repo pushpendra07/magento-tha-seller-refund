@@ -29,6 +29,8 @@ define([
         _create: function () {
             this.inFlight = false;
             this.lastGrandTotal = '0';
+            this.calcRequested = 0;
+            this.calcPainted = 0;
             this._on(this.element.find(this.options.selectors.qtyInput), {change: '_recalculate'});
             this._on(this.element.find(this.options.selectors.submit), {click: '_onSubmit'});
         },
@@ -53,9 +55,13 @@ define([
             return items;
         },
 
-        /** Server-side recalculation on every quantity change. */
+        /**
+         * Server-side recalculation on every quantity change. Responses can arrive out of order,
+         * so each request is numbered and only the newest one may repaint the totals.
+         */
         _recalculate: function () {
-            var self = this;
+            var self = this,
+                requestNo = ++this.calcRequested;
 
             $.ajax({
                 url: this.options.calculateUrl,
@@ -67,8 +73,12 @@ define([
                     items: this._collectItems()
                 }
             }).done(function (response) {
+                if (requestNo !== self.calcRequested) {
+                    return;
+                }
                 if (response.ok && response.figures) {
                     self._paint(response.figures);
+                    self.calcPainted = requestNo;
                 }
             });
         },
@@ -94,6 +104,14 @@ define([
             var self = this;
 
             if (this.inFlight) {
+                return;
+            }
+
+            // The confirmation must show the total for what is on screen now, not an older one.
+            if (this.calcPainted !== this.calcRequested) {
+                this.element.find(this.options.selectors.state)
+                    .text($t('The refund total is still being calculated. Please try again in a moment.'));
+
                 return;
             }
 
