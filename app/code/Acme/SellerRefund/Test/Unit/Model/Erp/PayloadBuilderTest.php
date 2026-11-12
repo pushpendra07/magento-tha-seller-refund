@@ -7,7 +7,6 @@ namespace Acme\SellerRefund\Test\Unit\Model\Erp;
 use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\Data\RefundItemInterface;
 use Acme\SellerRefund\Model\Erp\PayloadBuilder;
-use Acme\SellerRefund\Model\Erp\RequestKey;
 use Acme\SellerRefund\Model\Tax\TaxCodeResolver;
 use Magento\Sales\Api\Data\OrderInterface;
 use PHPUnit\Framework\MockObject\MockObject;
@@ -42,12 +41,7 @@ class PayloadBuilderTest extends TestCase
             $this->item('SELLER-BLU-02', '2', '1600.0000', '008', '128.0000'),
         ];
 
-        $payload = $this->builder->build(
-            $refund,
-            $items,
-            $this->createMock(OrderInterface::class),
-            RequestKey::forAttempt($refund, 1)
-        );
+        $payload = $this->builder->build($refund, $items, $this->createMock(OrderInterface::class));
 
         self::assertSame('SR-20260907-000123', $payload['refund_no']);
         self::assertSame('SO-1002', $payload['seller_order_id']);

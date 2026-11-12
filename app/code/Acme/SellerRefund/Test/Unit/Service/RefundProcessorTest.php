@@ -6,11 +6,13 @@ namespace Acme\SellerRefund\Test\Unit\Service;
 
 use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\RefundRepositoryInterface;
+use Acme\SellerRefund\Exception\IllegalTransitionException;
 use Acme\SellerRefund\Model\Erp\CreateResult;
 use Acme\SellerRefund\Model\Erp\ErpRefundClient;
 use Acme\SellerRefund\Model\Erp\Exception\ErpTransientException;
 use Acme\SellerRefund\Model\Erp\PayloadBuilder;
 use Acme\SellerRefund\Model\Erp\RequestKey;
+use Acme\SellerRefund\Model\Erp\RequestKeyFactory;
 use Acme\SellerRefund\Model\Event\EventRecorder;
 use Acme\SellerRefund\Model\Outbox\Outbox;
 use Acme\SellerRefund\Model\RefundFactory;
@@ -60,6 +62,10 @@ class RefundProcessorTest extends TestCase
         $this->client = $this->createMock(ErpRefundClient::class);
         $this->stateMachine = $this->createMock(RefundStateMachine::class);
         $this->eventRecorder = $this->createMock(EventRecorder::class);
+        $requestKeyFactory = $this->createMock(RequestKeyFactory::class);
+        $requestKeyFactory->method('create')->willReturnCallback(
+            static fn (array $data): RequestKey => new RequestKey($data['refundNo'], $data['attemptNo'])
+        );
 
         $this->processor = new RefundProcessor(
             $this->refundRepository,
@@ -81,8 +87,29 @@ class RefundProcessorTest extends TestCase
             $this->client,
             $this->payloadBuilder,
             $this->createMock(EventManagerInterface::class),
-            $this->createMock(TimezoneInterface::class)
+            $this->createMock(TimezoneInterface::class),
+            $requestKeyFactory
         );
+    }
+
+    /**
+     * The create-idempotency guard: when the ledger already shows a succeeded create for this
+     * refund_no, process() returns without calling the ERP client.
+     */
+    public function testProcessSkipsCreateWhenAlreadySucceededUpstream(): void
+    {
+        $refund = $this->createMock(RefundInterface::class);
+        $refund->method('getStatus')->willReturn(RefundInterface::STATUS_CALCULATED);
+        $refund->method('getRefundNo')->willReturn('SR-20260907-000123');
+
+        $this->refundRepository->method('getById')->with(7)->willReturn($refund);
+        $this->client->method('hasSucceededCreate')->with('SR-20260907-000123')->willReturn(true);
+
+        $this->client->expects(self::never())->method('create');
+        $this->stateMachine->expects(self::never())->method('transition');
+        $this->payloadBuilder->expects(self::never())->method('build');
+
+        $this->processor->process(7);
     }
 
     public function testProcessHappyPathCreatesAndTransitionsToCashRefundPending(): void
@@ -97,11 +124,16 @@ class RefundProcessorTest extends TestCase
         $this->orderRepository->method('get')->with(100)->willReturn(
             $this->createMock(\Magento\Sales\Api\Data\OrderInterface::class)
         );
+        $this->client->method('hasSucceededCreate')->willReturn(false);
+
         $payload = ['refund_no' => 'SR-20260907-000123'];
         $this->payloadBuilder->method('build')->willReturn($payload);
         $this->client->expects(self::once())
             ->method('create')
-            ->with($payload, self::callback(static fn (RequestKey $k): bool => $k->getValue() === 'SR-20260907-000123'))
+            ->with(
+                $payload,
+                self::callback(static fn (RequestKey $key): bool => $key->getValue() === 'SR-20260907-000123:01')
+            )
             ->willReturn(new CreateResult('ERP-9001', 'refund-pending'));
 
         $this->stateMachine->expects(self::once())
@@ -119,7 +151,7 @@ class RefundProcessorTest extends TestCase
         $this->processor->process(7);
     }
 
-    public function testErpRequestFailureMarksRefundFailed(): void
+    public function testProcessTransientErrorHoldsCalculatedAndRethrows(): void
     {
         $refund = $this->createMock(RefundInterface::class);
         $refund->method('getStatus')->willReturn(RefundInterface::STATUS_CALCULATED);
@@ -131,20 +163,63 @@ class RefundProcessorTest extends TestCase
         $this->orderRepository->method('get')->with(100)->willReturn(
             $this->createMock(\Magento\Sales\Api\Data\OrderInterface::class)
         );
+        $this->client->method('hasSucceededCreate')->willReturn(false);
         $this->payloadBuilder->method('build')->willReturn(['refund_no' => 'SR-20260907-000123']);
         $this->client->method('create')->willThrowException(
             new ErpTransientException('The ERP returned a transient error (HTTP 503).', 503)
         );
 
+        // A transient failure sets create_status to retryable_error and never advances status.
         $this->stateMachine->expects(self::once())
-            ->method('transition')
-            ->with(
-                self::identicalTo($refund),
-                RefundInterface::STATUS_FAILED,
-                \Acme\SellerRefund\Api\Data\RefundEventInterface::TYPE_ERP_CREATE,
-                [RefundInterface::CREATE_STATUS => RefundInterface::SUB_BUSINESS_REJECTED]
-            );
+            ->method('setSubStatus')
+            ->with($refund, RefundInterface::CREATE_STATUS, RefundInterface::SUB_RETRYABLE_ERROR);
+        $this->stateMachine->expects(self::never())->method('transition');
 
+        $this->expectException(ErpTransientException::class);
         $this->processor->process(7);
+    }
+
+    /**
+     * Finding 4: every attempt sends the same body (with the stored refund_no, BR-07), so the ERP
+     * replays instead of opening a second credit note. Only the X-Request-Id differs per attempt.
+     */
+    public function testRetryKeepsTheRefundNoAndChangesOnlyTheRequestId(): void
+    {
+        $refund = $this->createMock(RefundInterface::class);
+        $refund->method('getStatus')->willReturn(RefundInterface::STATUS_CALCULATED);
+        $refund->method('getRefundNo')->willReturn('SR-20260907-000123');
+        $refund->method('getOrderId')->willReturn(100);
+
+        $this->refundRepository->method('getById')->with(7)->willReturn($refund);
+        $this->refundRepository->method('getItems')->with(7)->willReturn([]);
+        $this->orderRepository->method('get')->with(100)->willReturn(
+            $this->createMock(\Magento\Sales\Api\Data\OrderInterface::class)
+        );
+        $this->client->method('hasSucceededCreate')->willReturn(false);
+        $payload = ['refund_no' => 'SR-20260907-000123'];
+        $this->payloadBuilder->method('build')->willReturn($payload);
+
+        $this->client->expects(self::once())
+            ->method('create')
+            ->with(
+                self::identicalTo($payload),
+                self::callback(static fn (RequestKey $key): bool => $key->getValue() === 'SR-20260907-000123:02')
+            )
+            ->willReturn(new CreateResult('ERP-9001', 'refund-pending'));
+
+        $this->processor->process(7, 2);
+    }
+
+    /**
+     * Finding 3: failed is terminal (FRD 7); a replay must not send Create again.
+     */
+    public function testReplayOfAFailedRefundIsRefused(): void
+    {
+        $refund = $this->createMock(RefundInterface::class);
+        $refund->method('getStatus')->willReturn(RefundInterface::STATUS_FAILED);
+        $this->refundRepository->method('getById')->with(7)->willReturn($refund);
+
+        $this->expectException(IllegalTransitionException::class);
+        $this->processor->replay(7, 1);
     }
 }

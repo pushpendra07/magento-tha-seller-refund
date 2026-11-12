@@ -9,10 +9,11 @@ use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\RefundRepositoryInterface;
 use Acme\SellerRefund\Exception\IllegalTransitionException;
 use Acme\SellerRefund\Model\Erp\ErpRefundClient;
-use Acme\SellerRefund\Model\Erp\Exception\ErpException;
+use Acme\SellerRefund\Model\Erp\Exception\ErpBusinessException;
+use Acme\SellerRefund\Model\Erp\Exception\ErpConflictException;
 use Acme\SellerRefund\Model\Erp\Exception\ErpTransientException;
 use Acme\SellerRefund\Model\Erp\PayloadBuilder;
-use Acme\SellerRefund\Model\Erp\RequestKey;
+use Acme\SellerRefund\Model\Erp\RequestKeyFactory;
 use Acme\SellerRefund\Model\Event\EventRecorder;
 use Acme\SellerRefund\Model\Outbox\Outbox;
 use Acme\SellerRefund\Model\RefundFactory;
@@ -58,7 +59,8 @@ class RefundProcessor
         private readonly ErpRefundClient $client,
         private readonly PayloadBuilder $payloadBuilder,
         private readonly EventManagerInterface $eventManager,
-        private readonly TimezoneInterface $timezone
+        private readonly TimezoneInterface $timezone,
+        private readonly RequestKeyFactory $requestKeyFactory
     ) {
     }
 
@@ -121,14 +123,23 @@ class RefundProcessor
     public function process(int $refundId, int $attemptNo = 1): void
     {
         $refund = $this->refundRepository->getById($refundId);
-        if (!in_array($refund->getStatus(), [RefundInterface::STATUS_CALCULATED, RefundInterface::STATUS_FAILED], true)) {
+        if ($refund->getStatus() !== RefundInterface::STATUS_CALCULATED) {
+            return;
+        }
+
+        // REF-142: a retried Create after a worker crash must not open a second
+        // credit note; skip when this refund_no already created upstream.
+        if ($this->client->hasSucceededCreate($refund->getRefundNo())) {
             return;
         }
 
         $items = $this->refundRepository->getItems($refundId);
         $order = $this->orderRepository->get($refund->getOrderId());
-        $requestKey = RequestKey::forAttempt($refund, $attemptNo);
-        $payload = $this->payloadBuilder->build($refund, $items, $order, $requestKey);
+        $payload = $this->payloadBuilder->build($refund, $items, $order);
+        $requestKey = $this->requestKeyFactory->create([
+            'refundNo' => (string) $refund->getRefundNo(),
+            'attemptNo' => $attemptNo,
+        ]);
 
         $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_CREATE, RefundInterface::SUB_PENDING, [
             'api_code' => 'create',
@@ -139,7 +150,16 @@ class RefundProcessor
 
         try {
             $result = $this->client->create($payload, $requestKey);
-        } catch (ErpException $e) {
+        } catch (ErpTransientException $e) {
+            $this->stateMachine->setSubStatus($refund, RefundInterface::CREATE_STATUS, RefundInterface::SUB_RETRYABLE_ERROR);
+            $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_CREATE, RefundInterface::SUB_RETRYABLE_ERROR, [
+                'api_code' => 'create',
+                'attempt_no' => $attemptNo,
+                'request_key' => $requestKey->getValue(),
+                'error_code' => (string) $e->getHttpCode(),
+            ]);
+            throw $e;
+        } catch (ErpBusinessException $e) {
             $this->stateMachine->transition(
                 $refund,
                 RefundInterface::STATUS_FAILED,
@@ -150,7 +170,21 @@ class RefundProcessor
                 'api_code' => 'create',
                 'attempt_no' => $attemptNo,
                 'request_key' => $requestKey->getValue(),
-                'error_code' => $e->getMessage(),
+                'error_code' => $e->getErpErrorCode(),
+            ]);
+            return;
+        } catch (ErpConflictException $e) {
+            $this->stateMachine->transition(
+                $refund,
+                RefundInterface::STATUS_FAILED,
+                RefundEventInterface::TYPE_ERP_CREATE,
+                [RefundInterface::CREATE_STATUS => RefundInterface::SUB_BUSINESS_REJECTED]
+            );
+            $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_CREATE, RefundInterface::SUB_BUSINESS_REJECTED, [
+                'api_code' => 'create',
+                'attempt_no' => $attemptNo,
+                'request_key' => $requestKey->getValue(),
+                'error_code' => 'conflict',
             ]);
             return;
         }
@@ -289,7 +323,6 @@ class RefundProcessor
         $refund = $this->refundRepository->getById($refundId);
         $operation = match ($refund->getStatus()) {
             RefundInterface::STATUS_CALCULATED => Outbox::OP_CREATE,
-            RefundInterface::STATUS_FAILED => Outbox::OP_CREATE,
             RefundInterface::STATUS_CASH_REFUNDED => Outbox::OP_STATUS_CHECK,
             RefundInterface::STATUS_ERP_CONFIRM_PENDING => Outbox::OP_CONFIRM,
             default => null,

@@ -26,7 +26,7 @@ class PayloadBuilder
      *
      * @return array<string, mixed>
      */
-    public function build(RefundInterface $refund, array $items, OrderInterface $order, RequestKey $key): array
+    public function build(RefundInterface $refund, array $items, OrderInterface $order): array
     {
         $lines = [];
         foreach ($items as $item) {
@@ -39,7 +39,7 @@ class PayloadBuilder
         }
 
         return [
-            'refund_no' => $key->getValue(),
+            'refund_no' => $refund->getRefundNo(),
             'seller_order_id' => $refund->getSellerOrderId(),
             'tax_mode' => self::TAX_MODE,
             'currency' => $refund->getCurrencyCode(),

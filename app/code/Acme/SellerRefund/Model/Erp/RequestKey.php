@@ -4,31 +4,54 @@ declare(strict_types=1);
 
 namespace Acme\SellerRefund\Model\Erp;
 
-use Acme\SellerRefund\Api\Data\RefundInterface;
-
 /**
- * Per-attempt ERP request key. The first attempt sends the plain refund number; a later
- * attempt sends a suffixed key so ERP-side audit entries for each attempt can be told apart.
+ * Identity of one ERP request attempt, for tracing only.
+ *
+ * Sent as the X-Request-Id header and stored on the attempt's audit event, so ERP-side entries
+ * for each attempt can be told apart. It is never the idempotency key: Create always sends the
+ * stored refund_no unchanged (BR-07), which the ERP deduplicates on.
+ *
+ * Create instances through the generated RequestKeyFactory.
  */
-final class RequestKey
+class RequestKey
 {
-    private function __construct(
-        private readonly string $value
+    /**
+     * @param string $refundNo
+     * @param int $attemptNo
+     */
+    public function __construct(
+        private readonly string $refundNo,
+        private readonly int $attemptNo
     ) {
     }
 
-    public static function forAttempt(RefundInterface $refund, int $attemptNo): self
+    /**
+     * The refund number the request belongs to.
+     *
+     * @return string
+     */
+    public function getRefundNo(): string
     {
-        $refundNo = $refund->getRefundNo();
-        if ($attemptNo <= 1) {
-            return new self($refundNo);
-        }
-
-        return new self(sprintf('%s-%02d', $refundNo, $attemptNo));
+        return $this->refundNo;
     }
 
+    /**
+     * The 1-based attempt number.
+     *
+     * @return int
+     */
+    public function getAttemptNo(): int
+    {
+        return $this->attemptNo;
+    }
+
+    /**
+     * Request identifier for this attempt, for example "SR-20261112-000123:02".
+     *
+     * @return string
+     */
     public function getValue(): string
     {
-        return $this->value;
+        return sprintf('%s:%02d', $this->refundNo, max(1, $this->attemptNo));
     }
 }
