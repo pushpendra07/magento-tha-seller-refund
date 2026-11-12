@@ -70,7 +70,8 @@ $currency = $config['currency'];
             <span><?= $block->escapeHtml(__('Submit Refund')) ?></span>
         </button>
         <p data-role="state" class="acme-refund-state"></p>
-        <p><a data-role="receipt-link" href="#" hidden="hidden"><?= $block->escapeHtml(__('Download receipt')) ?></a></p>
+        <p><a data-role="view-link" href="#" hidden="hidden"><?= $escaper->escapeHtml(__('View refund')) ?></a></p>
+        <p><a data-role="receipt-link" href="#" hidden="hidden"><?= $escaper->escapeHtml(__('Download receipt')) ?></a></p>
     </div>
 </div>
 

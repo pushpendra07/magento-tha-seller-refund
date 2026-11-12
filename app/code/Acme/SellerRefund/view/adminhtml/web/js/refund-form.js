@@ -2,8 +2,9 @@ define([
     'jquery',
     'mage/translate',
     'Magento_Ui/js/modal/confirm',
+    'Magento_Ui/js/modal/alert',
     'jquery-ui-modules/widget'
-], function ($, $t, confirm) {
+], function ($, $t, confirm, alert) {
     'use strict';
 
     $.widget('acme.acmeRefundForm', {
@@ -17,11 +18,13 @@ define([
                 qtyInput: '[data-role="qty-input"]',
                 lineRow: '[data-role="line-row"]',
                 lineAmount: '[data-role="line-amount"]',
+                remaining: '[data-role="remaining"]',
                 grandTotal: '[data-role="grand-total"]',
                 submit: '[data-role="submit"]',
                 reason: '[data-role="reason"]',
                 state: '[data-role="state"]',
-                receiptLink: '[data-role="receipt-link"]'
+                receiptLink: '[data-role="receipt-link"]',
+                viewLink: '[data-role="view-link"]'
             }
         },
 
@@ -99,18 +102,86 @@ define([
             this.element.find(this.options.selectors.grandTotal).text(this._money(figures.refund.grand_total));
         },
 
+        /**
+         * Advisory browser-side checks before the confirmation step (BR-03). The server
+         * re-checks everything on save; these only give the operator a clear message early.
+         *
+         * @return {String} an error message, or an empty string when the selection is valid
+         */
+        _validateSelection: function () {
+            var self = this,
+                selected = 0,
+                error = '';
+
+            this.element.find(this.options.selectors.qtyInput).each(function () {
+                var raw = $.trim($(this).val()),
+                    qty = Number(raw),
+                    row = $(this).closest(self.options.selectors.lineRow),
+                    sku = $.trim(row.find('td').first().text()),
+                    remaining = Number($.trim(row.find(self.options.selectors.remaining).text()));
+
+                if (raw === '' || qty === 0) {
+                    return true;
+                }
+                if (!Number.isInteger(qty) || qty < 0) {
+                    error = $t('Enter a whole number of 0 or more for %1.').replace('%1', sku);
+
+                    return false;
+                }
+                if (qty > remaining) {
+                    error = $t('The refund quantity for %1 exceeds the remaining quantity %2.')
+                        .replace('%1', sku)
+                        .replace('%2', remaining);
+
+                    return false;
+                }
+                selected++;
+
+                return true;
+            });
+
+            if (!error && selected === 0) {
+                error = $t('Select at least one item and a quantity to refund.');
+            }
+
+            return error;
+        },
+
+        /**
+         * @param {String} message
+         */
+        _showError: function (message) {
+            this.element.find(this.options.selectors.state).text('');
+            if (!message) {
+                return;
+            }
+
+            // Message text can come from the server or from line data, so it is escaped before
+            // it is placed in the dialog's HTML content.
+            alert({
+                title: $t('Cannot submit the refund'),
+                content: $('<div>').text(message).html()
+            });
+        },
+
         /** Confirmation step before any financial action. */
         _onSubmit: function () {
-            var self = this;
+            var self = this,
+                error;
 
             if (this.inFlight) {
                 return;
             }
 
+            error = this._validateSelection();
+            this._showError(error);
+            if (error) {
+                return;
+            }
+
             // The confirmation must show the total for what is on screen now, not an older one.
             if (this.calcPainted !== this.calcRequested) {
-                this.element.find(this.options.selectors.state)
-                    .text($t('The refund total is still being calculated. Please try again in a moment.'));
+                this._showError($t('The refund total is still being calculated. Please try again in a moment.'));
 
                 return;
             }
@@ -164,7 +235,15 @@ define([
          */
         _renderServerState: function (response) {
             var state = this.element.find(this.options.selectors.state),
-                link = this.element.find(this.options.selectors.receiptLink);
+                link = this.element.find(this.options.selectors.receiptLink),
+                viewLink = this.element.find(this.options.selectors.viewLink),
+                button = this.element.find(this.options.selectors.submit);
+
+            // The refund now exists. The button stays disabled so it cannot be submitted twice
+            // (BR-05), but its label and the locked inputs show that the work is done.
+            button.find('span').text($t('Refund Submitted'));
+            this.element.find(this.options.selectors.qtyInput).prop('disabled', true);
+            this.element.find(this.options.selectors.reason).prop('disabled', true);
 
             if (response.create_status === 'succeeded') {
                 state.text($t('Refund submitted and accepted by the ERP.'));
@@ -177,6 +256,11 @@ define([
                 link.attr('href', response.receipt_url);
                 link.prop('hidden', false);
             }
+
+            if (response.redirect_url) {
+                viewLink.attr('href', response.redirect_url);
+                viewLink.prop('hidden', false);
+            }
         },
 
         /** Only an error path re-enables the button. */
@@ -186,7 +270,7 @@ define([
             this.inFlight = false;
             button.prop('disabled', false);
             button.find('span').text($t('Submit Refund'));
-            this.element.find(this.options.selectors.state).text(message);
+            this._showError(message);
         },
 
         /** @return {String} */
