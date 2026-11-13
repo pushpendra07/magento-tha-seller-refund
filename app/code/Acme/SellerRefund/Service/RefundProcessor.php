@@ -282,6 +282,43 @@ class RefundProcessor
     }
 
     /**
+     * Records a rejected or conflicting Read Status / Confirm call on the refund and rethrows it.
+     *
+     * The cash has already been paid, so the main status stays as it is and the quantity stays
+     * counted. The sub-status and audit entry show what the ERP answered, and the outbox
+     * dead-letters the job for an operator to resolve and replay (FRD 9.6).
+     *
+     * @param RefundInterface $refund
+     * @param string $subStatusField
+     * @param string $eventType
+     * @param string $apiCode
+     * @param int $attemptNo
+     * @param ErpBusinessException|ErpConflictException $e
+     * @return never
+     * @throws ErpBusinessException|ErpConflictException
+     */
+    private function holdForOperator(
+        RefundInterface $refund,
+        string $subStatusField,
+        string $eventType,
+        string $apiCode,
+        int $attemptNo,
+        ErpBusinessException|ErpConflictException $e
+    ): never {
+        $subStatus = $e instanceof ErpConflictException
+            ? RefundInterface::SUB_CONFLICT
+            : RefundInterface::SUB_BUSINESS_REJECTED;
+        $this->stateMachine->setSubStatus($refund, $subStatusField, $subStatus);
+        $this->eventRecorder->record((int) $refund->getEntityId(), $eventType, $subStatus, [
+            'api_code' => $apiCode,
+            'attempt_no' => $attemptNo,
+            'error_code' => $e instanceof ErpBusinessException ? $e->getErpErrorCode() : 'conflict',
+        ]);
+
+        throw $e;
+    }
+
+    /**
      * Runs the given writes in one database transaction, so a state change and the job that
      * follows it are committed together or not at all.
      *
@@ -330,6 +367,15 @@ class RefundProcessor
                 'error_code' => $e->getErrorCode(),
             ]);
             throw $e;
+        } catch (ErpBusinessException | ErpConflictException $e) {
+            $this->holdForOperator(
+                $refund,
+                RefundInterface::STATUS_CHECK_STATUS,
+                RefundEventInterface::TYPE_ERP_STATUS,
+                'status',
+                $attemptNo,
+                $e
+            );
         }
 
         // Read-before-confirm (FRD sections 3 and 9.2): confirm only a credit note the ERP still
@@ -406,6 +452,15 @@ class RefundProcessor
                 'error_code' => $e->getErrorCode(),
             ]);
             throw $e;
+        } catch (ErpBusinessException | ErpConflictException $e) {
+            $this->holdForOperator(
+                $refund,
+                RefundInterface::CONFIRM_STATUS,
+                RefundEventInterface::TYPE_ERP_CONFIRM,
+                'confirm',
+                $attemptNo,
+                $e
+            );
         }
 
         $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_CONFIRM, RefundInterface::SUB_SUCCEEDED, [

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Acme\SellerRefund\Test\Unit\Service;
 
+use Acme\SellerRefund\Api\Data\RefundEventInterface;
 use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\RefundRepositoryInterface;
 use Acme\SellerRefund\Exception\StaleRefundException;
@@ -311,6 +312,115 @@ class RefundProcessorTest extends TestCase
             self::fail('The enqueue failure must reach the outbox worker.');
         } catch (\RuntimeException $e) {
             self::assertSame(['begin', 'transition', 'rollBack'], $calls);
+        }
+    }
+
+    /**
+     * FRD 9.6: a rejected or conflicting Confirm is shown on the refund (not left "In progress"),
+     * keeps the main status because the cash is already paid, and reaches the outbox so the job
+     * is dead-lettered for an operator.
+     *
+     * @param \Throwable $erpError
+     * @param string $subStatus
+     * @param string $errorCode
+     * @return void
+     * @dataProvider confirmRejectionProvider
+     */
+    public function testRejectedConfirmIsRecordedAndHeldForAnOperator(
+        \Throwable $erpError,
+        string $subStatus,
+        string $errorCode
+    ): void {
+        $refund = $this->createMock(RefundInterface::class);
+        $refund->method('getEntityId')->willReturn(7);
+        $refund->method('getStatus')->willReturn(RefundInterface::STATUS_ERP_CONFIRM_PENDING);
+        $refund->method('getErpRefundId')->willReturn('ERP-8000123');
+        $this->refundRepository->method('getById')->with(7)->willReturn($refund);
+        $this->client->method('confirm')->willThrowException($erpError);
+
+        $written = [];
+        $this->stateMachine->method('setSubStatus')->willReturnCallback(
+            function ($target, string $field, string $value) use (&$written): void {
+                $written[] = $field . '=' . $value;
+            }
+        );
+        $this->stateMachine->expects(self::never())->method('transition');
+        $this->eventRecorder->expects(self::once())->method('record')->with(
+            7,
+            RefundEventInterface::TYPE_ERP_CONFIRM,
+            $subStatus,
+            self::callback(fn (array $data): bool => $data['error_code'] === $errorCode)
+        );
+
+        try {
+            $this->processor->confirm(7);
+            self::fail('The rejection must reach the outbox to dead-letter the job.');
+        } catch (\Throwable $e) {
+            self::assertSame($erpError, $e);
+        }
+        self::assertSame(
+            [
+                RefundInterface::CONFIRM_STATUS . '=' . RefundInterface::SUB_PENDING,
+                RefundInterface::CONFIRM_STATUS . '=' . $subStatus,
+            ],
+            $written
+        );
+    }
+
+    /**
+     * @return array<string, array{0: \Throwable, 1: string, 2: string}>
+     */
+    public static function confirmRejectionProvider(): array
+    {
+        return [
+            'business rejection' => [
+                new ErpBusinessException('The ERP rejected the refund (HTTP 422).', 'invalid_transaction'),
+                RefundInterface::SUB_BUSINESS_REJECTED,
+                'invalid_transaction',
+            ],
+            'conflict' => [
+                new ErpConflictException('The ERP reported a conflicting refund state.'),
+                RefundInterface::SUB_CONFLICT,
+                'conflict',
+            ],
+        ];
+    }
+
+    /**
+     * The same for Read Refund Status: a conflict is recorded on the status-check sub-status.
+     *
+     * @return void
+     */
+    public function testConflictingStatusReadIsRecordedAndHeldForAnOperator(): void
+    {
+        $refund = $this->createMock(RefundInterface::class);
+        $refund->method('getEntityId')->willReturn(7);
+        $refund->method('getStatus')->willReturn(RefundInterface::STATUS_CASH_REFUNDED);
+        $refund->method('getErpRefundId')->willReturn('ERP-8000123');
+        $this->refundRepository->method('getById')->with(7)->willReturn($refund);
+        $this->client->method('readStatus')->willThrowException(
+            new ErpConflictException('The ERP reported a conflicting refund state.')
+        );
+
+        $written = [];
+        $this->stateMachine->method('setSubStatus')->willReturnCallback(
+            function ($target, string $field, string $value) use (&$written): void {
+                $written[] = $field . '=' . $value;
+            }
+        );
+        $this->stateMachine->expects(self::never())->method('transition');
+
+        $this->expectException(ErpConflictException::class);
+        try {
+            $this->processor->checkStatus(7);
+        } finally {
+            self::assertSame(
+                [
+                    RefundInterface::STATUS_CHECK_STATUS . '=' . RefundInterface::SUB_PENDING,
+                    RefundInterface::STATUS_CHECK_STATUS . '=' . RefundInterface::SUB_CONFLICT,
+                ],
+                $written
+            );
         }
     }
 
