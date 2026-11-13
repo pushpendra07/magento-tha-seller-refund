@@ -352,12 +352,13 @@ define([
 
         /**
          * Render the state the server declared. The accepted state is shown only when the server
-         * reports the create succeeded; otherwise the pending-retry state is shown. The client
+         * reports the create succeeded; other outcomes show their own recovery action. The client
          * never invents a lifecycle transition (FRD 14).
          */
         _renderServerState: function (response) {
             var s = this.options.selectors,
-                button = this.element.find(s.submit);
+                button = this.element.find(s.submit),
+                messages, status, message;
 
             // The refund now exists. The button stays disabled so it cannot be submitted twice
             // (BR-05), and the inputs lock to show that the work is done.
@@ -365,11 +366,31 @@ define([
             this.element.find(s.qtyInput + ',' + s.reason + ',' + s.refundAll + ',' + s.clear)
                 .prop('disabled', true);
 
-            if (response.create_status === 'succeeded') {
-                this._setState($t('Refund submitted and accepted by the ERP.'), 'success');
-            } else {
-                this._setState($t('Saved; ERP notification pending retry'), 'warning');
+            messages = {
+                succeeded: $t('Refund submitted and accepted by the ERP.'),
+                business_rejected: $t(
+                    'Saved, but the ERP rejected the refund. Open its details; no automatic retry.'
+                ),
+                conflict: $t(
+                    'Saved, but the ERP reported a conflict. Open the refund details for review.'
+                ),
+                invalid_payload: $t(
+                    'Saved, but the ERP request is invalid. Open its details; no automatic retry.'
+                ),
+                retries_exhausted: $t(
+                    'Saved, but the ERP retry limit was reached. Open the refund details for review.'
+                ),
+                retryable_error: $t('Saved; the ERP had a temporary error. A retry is scheduled.'),
+                pending: $t('Saved; the ERP request is being processed.'),
+                not_started: $t('Saved; waiting for the ERP request to be processed.')
+            };
+            status = response.create_status;
+            message = messages[status] || $t('Saved. Open the refund details to check the current status.');
+
+            if (response.status === 'failed' && status !== 'business_rejected') {
+                message = $t('The refund failed. Open the refund details before taking further action.');
             }
+            this._setState(message, status === 'succeeded' && response.status !== 'failed' ? 'success' : 'warning');
 
             // BR-11: the receipt is available as soon as the server confirms the record exists.
             if (response.receipt_url) {
