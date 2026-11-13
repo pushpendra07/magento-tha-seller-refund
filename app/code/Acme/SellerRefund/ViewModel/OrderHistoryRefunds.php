@@ -10,6 +10,7 @@ use Acme\SellerRefund\Model\Total\RefundTotalCalculator;
 use Magento\Customer\Model\Session as CustomerSession;
 use Magento\Framework\View\Element\Block\ArgumentInterface;
 use Magento\Sales\Api\OrderRepositoryInterface;
+use Magento\Sales\Model\ResourceModel\Order\Collection;
 use Magento\Sales\Model\ResourceModel\Order\CollectionFactory as OrderCollectionFactory;
 
 /**
@@ -39,8 +40,12 @@ class OrderHistoryRefunds implements ArgumentInterface
             return [];
         }
 
+        // Newest first, like the My Orders list above this block; the id keeps orders placed in
+        // the same second in a fixed order.
         $orders = $this->orderCollectionFactory->create()
-            ->addFieldToFilter('customer_id', (int) $customerId);
+            ->addFieldToFilter('customer_id', (int) $customerId)
+            ->setOrder('created_at', Collection::SORT_ORDER_DESC)
+            ->setOrder('entity_id', Collection::SORT_ORDER_DESC);
 
         $entries = [];
         foreach ($orders as $order) {
