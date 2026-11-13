@@ -57,6 +57,44 @@ class OutboxRecoveryTest extends DbTransactionTestCase
     }
 
     /**
+     * Refunds that cannot be re-queued must not fill the sweep's page. With a batch of one and
+     * the oldest cash_refunded refund dead-lettered, the next refund still gets its job.
+     */
+    public function testDeadLetteredRefundsDoNotHideLaterOnes(): void
+    {
+        $connection = $this->connection();
+        $refunds = $this->get(ResourceConnection::class)->getTableName('mp_refund');
+        $outbox = $this->get(ResourceConnection::class)->getTableName('mp_refund_outbox');
+        $ids = array_map('intval', $connection->fetchCol(
+            $connection->select()->from($refunds, ['entity_id'])->order('entity_id ASC')->limit(2)
+        ));
+        self::assertCount(2, $ids, 'The seed must contain at least two refunds.');
+        [$stuck, $waiting] = $ids;
+
+        $connection->update(
+            $refunds,
+            ['status' => RefundInterface::STATUS_CASH_REFUNDED, 'created_at' => '2026-01-01 00:00:00'],
+            ['entity_id IN (?)' => $ids]
+        );
+        $connection->delete($outbox, ['refund_id IN (?)' => $ids]);
+        $connection->insert($outbox, [
+            'refund_id' => $stuck,
+            'operation' => Outbox::OP_STATUS_CHECK,
+            'state' => Outbox::STATE_DEAD,
+            'attempts' => 8,
+            'available_at' => new \Zend_Db_Expr('NOW()'),
+        ]);
+
+        $this->get(Reconciler::class)->run(new DateTimeImmutable('+1 day'), 1);
+
+        self::assertTrue(
+            $this->get(Outbox::class)->hasPending($waiting),
+            'The refund after a dead-lettered one must still be re-queued.'
+        );
+        self::assertFalse($this->get(Outbox::class)->hasPending($stuck));
+    }
+
+    /**
      * Save makes one best-effort Create attempt. It must be for the refund just saved, not the
      * oldest pending job in the queue, which may belong to another refund.
      */

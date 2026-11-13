@@ -25,22 +25,20 @@ class Reconciler
     public function run(DateTimeInterface $now, int $batch): int
     {
         $collection = $this->collectionFactory->create();
+        // Refunds that already have a queued job, or a dead-lettered status check waiting for an
+        // operator replay, are excluded in SQL before the page limit. Filtering them after the
+        // limit let a full page of such refunds hide every later one that needed a job.
         $collection->addStatusFilter(RefundInterface::STATUS_CASH_REFUNDED)
             ->addCreatedBeforeFilter($now->format('Y-m-d H:i:s'))
+            ->addWithoutOutboxWorkFilter(Outbox::OP_STATUS_CHECK)
+            ->setOrder(RefundInterface::ENTITY_ID, 'ASC')
             ->setPageSize($batch)
             ->setCurPage(1);
 
         $enqueued = 0;
         foreach ($collection as $refund) {
-            $refundId = (int) $refund->getEntityId();
-            // A dead-lettered check waits for an operator replay; re-queueing it here would retry
-            // a permanently failing call forever.
-            if (!$this->outbox->hasPending($refundId)
-                && !$this->outbox->hasDead($refundId, Outbox::OP_STATUS_CHECK)
-            ) {
-                $this->outbox->enqueue($refundId, Outbox::OP_STATUS_CHECK);
-                $enqueued++;
-            }
+            $this->outbox->enqueue((int) $refund->getEntityId(), Outbox::OP_STATUS_CHECK);
+            $enqueued++;
         }
 
         return $enqueued;
