@@ -51,8 +51,9 @@ class ErpRefundClient
         $this->classify($curl, false);
 
         $body = $this->decode($curl->getBody());
-        $erpId = (string) ($body['erp_refund_id'] ?? '');
-        $this->assertSuccessBody('Create Refund', $curl, $erpId !== '', $body, self::STATUS_PENDING);
+        $erpId = $body['erp_refund_id'] ?? null;
+        $validId = is_string($erpId) && strlen($erpId) <= 64 && preg_match('/^ERP-[0-9]+$/D', $erpId) === 1;
+        $this->assertSuccessBody('Create Refund', $curl, $validId, $body, self::STATUS_PENDING);
 
         return new CreateResult($erpId, (string) $body['status']);
     }

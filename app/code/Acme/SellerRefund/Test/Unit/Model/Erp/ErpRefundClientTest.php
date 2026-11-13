@@ -38,6 +38,18 @@ class ErpRefundClientTest extends TestCase
     }
 
     /**
+     * The storage boundary is accepted without truncation.
+     *
+     * @return void
+     */
+    public function testMaximumLengthCreditNoteIdIsAccepted(): void
+    {
+        $id = 'ERP-' . str_repeat('1', 60);
+        $client = $this->client((string) json_encode(['erp_refund_id' => $id, 'status' => 'refund-pending']));
+        self::assertSame($id, $client->create(['refund_no' => 'SR-20261113-000001'])->getErpRefundId());
+    }
+
+    /**
      * @param string $operation
      * @param string $body
      * @return void
@@ -65,6 +77,15 @@ class ErpRefundClientTest extends TestCase
     public static function invalidSuccessBodyProvider(): array
     {
         return [
+            'create: blank id' => ['create', '{"erp_refund_id":" ","status":"refund-pending"}'],
+            'create: numeric id' => ['create', '{"erp_refund_id":123,"status":"refund-pending"}'],
+            'create: array id' => ['create', '{"erp_refund_id":[],"status":"refund-pending"}'],
+            'create: wrong prefix' => ['create', '{"erp_refund_id":"NOTE-12","status":"refund-pending"}'],
+            'create: trailing newline' => ['create', '{"erp_refund_id":"ERP-12\\n","status":"refund-pending"}'],
+            'create: overlong id' => [
+                'create',
+                (string) json_encode(['erp_refund_id' => 'ERP-' . str_repeat('1', 61), 'status' => 'refund-pending']),
+            ],
             'create: invalid JSON' => ['create', 'OK'],
             'create: no credit note id' => ['create', '{"status":"refund-pending"}'],
             'create: unexpected status' => ['create', '{"erp_refund_id":"ERP-8000123","status":"refund-rejected"}'],
