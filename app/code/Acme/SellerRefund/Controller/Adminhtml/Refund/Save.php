@@ -52,6 +52,7 @@ class Save extends Action implements HttpPostActionInterface
                 'erp_refund_id' => $fresh->getErpRefundId(),
                 'message' => (string) __('Refund %1 saved.', $fresh->getRefundNo()),
                 'redirect_url' => $this->getUrl('acme_refund/refund/view', ['refund_id' => $fresh->getEntityId()]),
+                'receipt_url' => $this->getUrl('acme_refund/refund/receipt', ['refund_id' => $fresh->getEntityId()]),
             ]);
         } catch (LocalizedException $e) {
             return $result->setData(['ok' => false, 'message' => $e->getMessage()]);

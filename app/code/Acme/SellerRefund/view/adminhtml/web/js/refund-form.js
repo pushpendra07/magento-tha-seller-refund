@@ -147,8 +147,10 @@ define([
                 state.text($t('Saved; ERP notification pending retry'));
             }
 
-            if (response.redirect_url) {
-                link.attr('href', response.redirect_url);
+            // BR-11: the receipt can be downloaded as soon as the server reports the refund
+            // record exists, which is this response; the link opens the PDF, not the admin page.
+            if (response.receipt_url) {
+                link.attr('href', response.receipt_url);
                 link.prop('hidden', false);
             }
         },
