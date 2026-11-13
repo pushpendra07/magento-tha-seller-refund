@@ -103,7 +103,8 @@
             "updated_at": true
         },
         "index": {
-            "MP_REFUND_OUTBOX_STATE_AVAILABLE_AT": true
+            "MP_REFUND_OUTBOX_STATE_AVAILABLE_AT": true,
+            "MP_REFUND_OUTBOX_REFUND_ID_OPERATION_STATE": true
         },
         "constraint": {
             "PRIMARY": true,

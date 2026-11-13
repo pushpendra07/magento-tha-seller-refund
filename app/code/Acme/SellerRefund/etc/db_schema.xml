@@ -114,6 +114,11 @@
             <column name="state"/>
             <column name="available_at"/>
         </index>
+        <index referenceId="MP_REFUND_OUTBOX_REFUND_ID_OPERATION_STATE" indexType="btree">
+            <column name="refund_id"/>
+            <column name="operation"/>
+            <column name="state"/>
+        </index>
     </table>
 
     <table name="mp_refund_sequence" resource="default" engine="innodb" comment="Per-day refund number sequence">
