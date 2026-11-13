@@ -21,9 +21,6 @@ define([
                 qtyError: '[data-role="qty-error"]',
                 lineRow: '[data-role="line-row"]',
                 lineAmount: '[data-role="line-amount"]',
-                refundSubtotal: '[data-role="refund-subtotal"]',
-                refundShipping: '[data-role="refund-shipping"]',
-                refundTax: '[data-role="refund-tax"]',
                 grandTotal: '[data-role="grand-total"]',
                 refundAll: '[data-role="refund-all"]',
                 clear: '[data-role="clear"]',
@@ -140,14 +137,13 @@ define([
             }
         },
 
-        /** Blank the line amounts and refund totals until the quantities are valid again. */
+        /** Blank the line amounts and the grand total until the quantities are valid again. */
         _clearAmounts: function () {
             var s = this.options.selectors;
 
             this.calcRequested++;
             this.lastGrandTotal = '0';
-            this.element.find([s.lineAmount, s.refundSubtotal, s.refundShipping, s.refundTax, s.grandTotal].join(','))
-                .html('&mdash;');
+            this.element.find([s.lineAmount, s.grandTotal].join(',')).html('&mdash;');
         },
 
         /** Fill every editable line with its remaining quantity; one recalculation for all. */
@@ -198,7 +194,7 @@ define([
             });
         },
 
-        /** Repaint the per-line amounts and the refund totals from the server figures. */
+        /** Repaint the per-line amounts and the grand total from the server figures. */
         _paint: function (figures) {
             var self = this,
                 s = this.options.selectors;
@@ -212,9 +208,6 @@ define([
             });
 
             this.lastGrandTotal = figures.refund.grand_total;
-            this.element.find(s.refundSubtotal).text(this._money(figures.refund.subtotal));
-            this.element.find(s.refundShipping).text(this._money(figures.refund.shipping));
-            this.element.find(s.refundTax).text(this._money(figures.refund.tax));
             this.element.find(s.grandTotal).text(this._money(figures.refund.grand_total));
             this._setState('', '');
         },

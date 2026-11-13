@@ -10,8 +10,6 @@ use Acme\SellerRefund\Model\SellerLineResolver;
 use Acme\SellerRefund\Model\Source\RefundReason;
 use Acme\SellerRefund\Model\Tax\LineTaxRate;
 use Acme\SellerRefund\Model\Tax\TaxCodeResolver;
-use Acme\SellerRefund\Model\Total\RefundFigures;
-use Acme\SellerRefund\Model\Total\RefundTotalCalculator;
 use Magento\Backend\Block\Template;
 use Magento\Backend\Block\Template\Context;
 use Magento\Backend\Block\Widget\Button;
@@ -43,7 +41,6 @@ class Form extends Template
         private readonly FormKey $formKeyProvider,
         private readonly RefundReason $refundReason,
         private readonly RefundEligibility $eligibility,
-        private readonly RefundTotalCalculator $calculator,
         private readonly FormatInterface $localeFormat,
         array $data = []
     ) {
@@ -179,7 +176,7 @@ class Form extends Template
     }
 
     /**
-     * Order and customer facts for the information panel, from the order already loaded.
+     * Order details shown above the form, from the order already loaded (no extra query).
      *
      * @return array<string, string|int|null>
      */
@@ -189,36 +186,17 @@ class Form extends Template
         $timezone = new \DateTimeZone($this->_localeDate->getConfigTimezone());
         $deadline = $this->eligibility->deadline($order, $timezone);
         $now = new \DateTimeImmutable('now', $timezone);
-        $deliveredAt = (string) $order->getData('mp_delivered_at');
         $name = trim((string) $order->getCustomerFirstname() . ' ' . (string) $order->getCustomerLastname());
 
         return [
             'increment_id' => (string) $order->getIncrementId(),
             'order_url' => $this->getBackUrl(),
-            'created_at' => $this->formatDate($order->getCreatedAt(), \IntlDateFormatter::MEDIUM, true),
-            'status' => (string) $order->getStatusLabel(),
-            'seller_order_id' => (string) $order->getData('mp_seller_order_id'),
-            'delivered_at' => $deliveredAt !== '' ? $this->formatDate($deliveredAt, \IntlDateFormatter::MEDIUM) : '',
-            'deadline' => $deadline ? $this->formatDate($deadline, \IntlDateFormatter::MEDIUM) : '',
-            'days_left' => $deadline ? max(0, (int) $now->diff($deadline)->format('%r%a')) : null,
+            'created_at' => $this->formatDate($order->getCreatedAt(), \IntlDateFormatter::MEDIUM),
             'customer_name' => $name !== '' ? $name : (string) __('Guest'),
             'customer_email' => (string) $order->getCustomerEmail(),
+            'deadline' => $deadline ? $this->formatDate($deadline, \IntlDateFormatter::MEDIUM) : '',
+            'days_left' => $deadline ? max(0, (int) $now->diff($deadline)->format('%r%a')) : null,
         ];
-    }
-
-    /**
-     * Pre-refund figures and an empty refund, from data already loaded (no extra request).
-     *
-     * @return RefundFigures
-     */
-    public function getInitialFigures(): RefundFigures
-    {
-        return $this->calculator->fromSelection(
-            $this->getOrder(),
-            [],
-            $this->getPriorRefunded(),
-            $this->_localeDate->date()
-        );
     }
 
     /**

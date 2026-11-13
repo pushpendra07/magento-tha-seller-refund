@@ -2,24 +2,34 @@
 .acme-refund-form [hidden] {
     display: none !important;
 }
-.acme-refund-form .acme-refund-items-toolbar {
-    margin-bottom: 1.5rem;
-    text-align: right;
-}
-.acme-refund-form .acme-refund-items-toolbar button {
-    margin-left: 1rem;
-}
-.acme-refund-form .acme-refund-summary {
+.acme-refund-form .acme-refund-order-info {
     display: flex;
-    gap: 4rem;
+    flex-wrap: wrap;
+    gap: 1rem 4rem;
+    padding: 1.5rem 0 2rem;
+    margin-bottom: 2rem;
+    border-bottom: 1px solid #e3e3e3;
 }
-.acme-refund-form .acme-refund-summary > .admin__page-section-item {
-    flex: 1;
-    float: none;
-    width: auto;
+.acme-refund-form .acme-refund-order-info-label {
+    display: block;
+    margin-bottom: 0.4rem;
+    color: #6d6d6d;
+    font-size: 1.2rem;
 }
-.acme-refund-form .acme-refund-summary .admin__field {
-    margin-bottom: 2.5rem;
+.acme-refund-form .acme-refund-days-left {
+    color: #6d6d6d;
+}
+.acme-refund-form .acme-refund-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 1.5rem;
+}
+.acme-refund-form .acme-refund-reason {
+    margin-bottom: 0;
+}
+.acme-refund-form .acme-refund-quick-actions button {
+    margin-left: 1rem;
 }
 .acme-refund-form .acme-refund-lines .qty-input {
     width: 8rem;
@@ -33,12 +43,8 @@
 .acme-refund-form .acme-refund-fully-refunded {
     font-style: italic;
 }
-.acme-refund-form .acme-refund-days-left {
-    color: #6d6d6d;
-}
 .acme-refund-form .acme-refund-actions {
     margin-top: 2rem;
-    text-align: right;
 }
 .acme-refund-form .acme-refund-state {
     margin-top: 1.5rem;
