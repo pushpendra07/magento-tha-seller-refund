@@ -6,6 +6,7 @@ namespace Acme\SellerRefund\Test\Unit\Service;
 
 use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\RefundRepositoryInterface;
+use Acme\SellerRefund\Exception\StaleRefundException;
 use Acme\SellerRefund\Exception\ValidationException;
 use Acme\SellerRefund\Model\Erp\CreateResult;
 use Acme\SellerRefund\Model\Erp\ErpRefundClient;
@@ -179,13 +180,15 @@ class RefundProcessorTest extends TestCase
         );
 
         // A transient failure sets create_status to retryable_error and never advances status.
-        $this->stateMachine->expects(self::once())
-            ->method('setSubStatus')
-            ->with($refund, RefundInterface::CREATE_STATUS, RefundInterface::SUB_RETRYABLE_ERROR);
+        $subStatuses = $this->recordCreateSubStatuses($refund);
         $this->stateMachine->expects(self::never())->method('transition');
 
-        $this->expectException(ErpTransientException::class);
-        $this->processor->process(7);
+        try {
+            $this->processor->process(7);
+            self::fail('The transient error must be rethrown for the outbox to retry.');
+        } catch (ErpTransientException $e) {
+            self::assertSame([RefundInterface::SUB_PENDING, RefundInterface::SUB_RETRYABLE_ERROR], $subStatuses->list);
+        }
     }
 
     /**
@@ -211,12 +214,61 @@ class RefundProcessorTest extends TestCase
             new ErpConflictException('The ERP reported a conflict (HTTP 409).')
         );
 
-        $this->stateMachine->expects(self::once())
-            ->method('setSubStatus')
-            ->with($refund, RefundInterface::CREATE_STATUS, RefundInterface::SUB_CONFLICT);
+        $subStatuses = $this->recordCreateSubStatuses($refund);
         $this->stateMachine->expects(self::never())->method('transition');
 
         $this->processor->process(7);
+        self::assertSame([RefundInterface::SUB_PENDING, RefundInterface::SUB_CONFLICT], $subStatuses->list);
+    }
+
+    /**
+     * BR-09: a cancel that committed after this worker read the refund makes the Create claim
+     * fail, and the ERP is then never called, so no credit note exists for a cancelled refund.
+     */
+    public function testCreateIsNotSentWhenTheRefundChangedBeforeTheClaim(): void
+    {
+        $refund = $this->createMock(RefundInterface::class);
+        $refund->method('getStatus')->willReturn(RefundInterface::STATUS_CALCULATED);
+        $refund->method('getRefundNo')->willReturn('SR-20260907-000123');
+        $refund->method('getOrderId')->willReturn(100);
+
+        $this->refundRepository->method('getById')->with(7)->willReturn($refund);
+        $this->refundRepository->method('getItems')->with(7)->willReturn([]);
+        $this->orderRepository->method('get')->with(100)->willReturn(
+            $this->createMock(\Magento\Sales\Api\Data\OrderInterface::class)
+        );
+        $this->client->method('hasSucceededCreate')->willReturn(false);
+        $this->payloadBuilder->method('build')->willReturn(['refund_no' => 'SR-20260907-000123']);
+        $this->stateMachine->expects(self::once())
+            ->method('setSubStatus')
+            ->with($refund, RefundInterface::CREATE_STATUS, RefundInterface::SUB_PENDING)
+            ->willThrowException(new StaleRefundException(__('The refund was modified by another process.')));
+
+        $this->client->expects(self::never())->method('create');
+        $this->stateMachine->expects(self::never())->method('transition');
+
+        $this->processor->process(7);
+    }
+
+    /**
+     * Collects the create_status values written, in order.
+     *
+     * @param RefundInterface $refund
+     * @return \stdClass
+     */
+    private function recordCreateSubStatuses(RefundInterface $refund): \stdClass
+    {
+        $written = new \stdClass();
+        $written->list = [];
+        $this->stateMachine->method('setSubStatus')->willReturnCallback(
+            function ($target, string $field, string $value) use ($refund, $written): void {
+                self::assertSame($refund, $target);
+                self::assertSame(RefundInterface::CREATE_STATUS, $field);
+                $written->list[] = $value;
+            }
+        );
+
+        return $written;
     }
 
     /**

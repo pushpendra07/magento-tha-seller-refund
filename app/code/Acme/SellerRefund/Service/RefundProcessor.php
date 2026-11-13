@@ -9,6 +9,7 @@ use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\RefundRepositoryInterface;
 use Acme\SellerRefund\Exception\IllegalTransitionException;
 use Acme\SellerRefund\Exception\NotEligibleException;
+use Acme\SellerRefund\Exception\StaleRefundException;
 use Acme\SellerRefund\Exception\ValidationException;
 use Acme\SellerRefund\Model\Erp\ErpRefundClient;
 use Acme\SellerRefund\Model\Erp\Exception\ErpBusinessException;
@@ -182,6 +183,15 @@ class RefundProcessor
             $payload,
             fn () => $this->payloadValidator->validateCreate($payload)
         );
+
+        // Claim the Create before calling the ERP (BR-09). The versioned write makes a cancel that
+        // read the refund earlier fail, and once create_status is pending canCancel() refuses it.
+        // If a cancel (or another worker) wrote first, this claim fails and nothing is sent.
+        try {
+            $this->stateMachine->setSubStatus($refund, RefundInterface::CREATE_STATUS, RefundInterface::SUB_PENDING);
+        } catch (StaleRefundException $e) {
+            return;
+        }
 
         $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_CREATE, RefundInterface::SUB_PENDING, [
             'api_code' => 'create',
