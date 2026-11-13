@@ -106,6 +106,22 @@ quantities change, and only the latest response is shown. Before the confirmatio
 form checks the selection in the browser: at least one line, whole numbers, and no more than
 remains. The server checks everything again (BR-03), under an order lock.
 
+**Receipt PDF.** The download uses Magento's `FileFactory` response and a dedicated
+`Model/Pdf/ReceiptDocument` based on `Magento\Sales\Model\Order\Pdf\AbstractPdf`. It reads the
+same immutable refund-item snapshot as the other surfaces and keeps the original seller totals
+separate from the refund breakdown. Product names and SKUs wrap to the column width; long
+receipts repeat the document identity and item headings on continuation pages. The receipt
+includes quantities, unit prices, line shipping, tax rates/business codes, prior refunded
+quantities, an ex-tax total and a tax-by-rate summary. A pending refund's receipt shows its
+actual lifecycle status rather than implying that Finance has paid it.
+
+Configure the PDF logo and seller address under **Sales > Sales > Invoice and Packing Slip
+Design** (`sales/identity/logo` and `sales/identity/address`). A configured store VAT number
+is printed as the tax-registration reference. The renderer uses Magento's bundled PDF fonts
+and store/currency formatting; full-width yen is normalized to the equivalent yen glyph those
+fonts support. Financial snapshot values remain four-place decimals; currency formatting is
+display-only. No native Magento credit memo or order totals are created or changed.
+
 ## Lifecycle
 
 ```
@@ -199,7 +215,7 @@ The event `acme_seller_refund_confirmed` is dispatched when a refund reaches `er
 ## Tests
 
 ```bash
-bin/assignment-test unit           # 73 tests
+bin/assignment-test unit           # 93 tests
 bin/assignment-test integration    # 21 tests, each in a rolled-back transaction
 bin/assignment-test smoke          # storefront, admin, ERP stub, Create happy path
 bin/assignment-test all

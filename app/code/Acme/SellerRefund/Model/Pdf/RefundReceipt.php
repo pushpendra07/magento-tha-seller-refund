@@ -6,28 +6,44 @@ namespace Acme\SellerRefund\Model\Pdf;
 
 use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\RefundRepositoryInterface;
+use Acme\SellerRefund\Model\Source\RefundStatus;
+use Acme\SellerRefund\Model\Total\RefundFigureLine;
 use Acme\SellerRefund\Model\Total\RefundTotalCalculator;
+use Magento\Framework\Pricing\PriceCurrencyInterface;
 use Magento\Framework\Stdlib\DateTime\TimezoneInterface;
 use Magento\Sales\Api\OrderRepositoryInterface;
 
 /**
  * Reissued receipt / qualified tax invoice for a refund. Every figure is taken from the
  * stored refund snapshot through the calculator, so the receipt agrees with the other
- * presentation surfaces and the downstream export. Labels are ASCII only.
+ * presentation surfaces and the downstream export.
  */
 class RefundReceipt
 {
+    /**
+     * @param RefundRepositoryInterface $refundRepository
+     * @param OrderRepositoryInterface $orderRepository
+     * @param RefundTotalCalculator $calculator
+     * @param TimezoneInterface $timezone
+     * @param ReceiptDocumentFactory $documentFactory
+     * @param PriceCurrencyInterface $priceCurrency
+     * @param RefundStatus $refundStatus
+     */
     public function __construct(
         private readonly RefundRepositoryInterface $refundRepository,
         private readonly OrderRepositoryInterface $orderRepository,
         private readonly RefundTotalCalculator $calculator,
-        private readonly TimezoneInterface $timezone
+        private readonly TimezoneInterface $timezone,
+        private readonly ReceiptDocumentFactory $documentFactory,
+        private readonly PriceCurrencyInterface $priceCurrency,
+        private readonly RefundStatus $refundStatus
     ) {
     }
 
     /**
      * View data for the receipt. This is the harness inspection point.
      *
+     * @param RefundInterface $refund
      * @return array<string, mixed>
      */
     public function buildData(RefundInterface $refund): array
@@ -36,11 +52,20 @@ class RefundReceipt
         $order = $this->orderRepository->get($refund->getOrderId());
         $figures = $this->calculator->fromSnapshot($refund, $items, $order);
 
-        return [
+        $storeId = (int) $order->getStoreId();
+        $prior = [];
+        foreach ($items as $item) {
+            $prior[$item->getOrderItemId()] = $item->getQtyRefundedBefore();
+        }
+        $data = [
             'refund_no' => $refund->getRefundNo(),
+            'order_no' => (string) $order->getIncrementId(),
+            'store_id' => $storeId,
+            'status' => $refund->getStatus(),
+            'status_label' => $this->refundStatus->getLabel($refund->getStatus()) ?? $refund->getStatus(),
             'currency' => $figures->currency,
             'is_partial' => $figures->isPartial(),
-            'refund_date' => $this->refundDate($refund),
+            'refund_date' => $this->timezone->scopeDate($storeId, $refund->getCreatedAt(), true)->format('Y-m-d'),
             'pre_refund' => [
                 'subtotal' => $figures->preRefundSubtotal,
                 'shipping' => $figures->preRefundShipping,
@@ -54,108 +79,101 @@ class RefundReceipt
                 'grand_total' => $figures->refundGrandTotal,
             ],
             'lines' => array_map(
-                static fn (\Acme\SellerRefund\Model\Total\RefundFigureLine $line): array => $line->toArray(),
+                static fn (RefundFigureLine $line): array => $line->toArray() + [
+                    'refunded_before' => $prior[$line->orderItemId] ?? '0.0000',
+                ],
                 $figures->lines
             ),
+            'tax_groups' => $this->taxGroups($figures->lines),
         ];
+        foreach (['pre_refund', 'refund'] as $key) {
+            $totals = $data[$key];
+            $totals['ex_tax'] = bcadd($totals['subtotal'], $totals['shipping'], 4);
+            $data['display'][$key] = $this->formatAmounts($totals, $storeId, $figures->currency);
+        }
+        foreach ($data['lines'] as $index => $line) {
+            $data['display']['lines'][$index] = $this->formatAmounts(
+                array_intersect_key($line, array_flip([
+                    'unit_price', 'row_amount', 'shipping_amount', 'tax_amount', 'grand_total',
+                ])),
+                $storeId,
+                $figures->currency
+            );
+        }
+        foreach ($data['tax_groups'] as $index => $group) {
+            $data['display']['tax_groups'][$index] = $this->formatAmounts(
+                ['taxable' => $group['taxable'], 'tax' => $group['tax']],
+                $storeId,
+                $figures->currency
+            );
+        }
+
+        return $data;
     }
 
     /**
      * Render the receipt as PDF bytes.
+     *
+     * @param RefundInterface $refund
+     * @return string
      */
     public function render(RefundInterface $refund): string
     {
-        $data = $this->buildData($refund);
-        $currency = (string) $data['currency'];
-
-        $pdf = new \Zend_Pdf();
-        $page = new \Zend_Pdf_Page(\Zend_Pdf_Page::SIZE_A4);
-        $pdf->pages[] = $page;
-        $font = \Zend_Pdf_Font::fontWithName(\Zend_Pdf_Font::FONT_HELVETICA);
-        $bold = \Zend_Pdf_Font::fontWithName(\Zend_Pdf_Font::FONT_HELVETICA_BOLD);
-
-        $y = 800;
-        $page->setFont($bold, 14);
-        $y = $this->line($page, 'Refund Receipt / Qualified Invoice', $y, 18);
-
-        $page->setFont($font, 10);
-        $y = $this->line($page, 'Refund No: ' . $this->ascii((string) $data['refund_no']), $y);
-        $y = $this->line($page, 'Refund Date: ' . $this->ascii((string) $data['refund_date']), $y);
-        $y = $this->line($page, 'Refund Type: ' . ($data['is_partial'] ? 'Partial Refund' : 'Full Refund'), $y, 18);
-
-        $page->setFont($bold, 11);
-        $y = $this->line($page, 'Refunded Lines', $y, 14);
-        $page->setFont($font, 9);
-        foreach ((array) $data['lines'] as $lineData) {
-            $text = sprintf(
-                '%s  x%s  rate %s  ex-tax %s  tax %s  total %s',
-                $this->ascii((string) $lineData['sku']),
-                $this->ascii((string) $lineData['qty_refund']),
-                $this->ascii((string) $lineData['tax_rate']),
-                $this->money($lineData['row_amount'], $currency),
-                $this->money($lineData['tax_amount'], $currency),
-                $this->money($lineData['grand_total'], $currency)
-            );
-            $y = $this->line($page, $text, $y);
-        }
-
-        $y -= 8;
-        $page->setFont($bold, 11);
-        $y = $this->line($page, 'Pre-refund Total', $y, 14);
-        $page->setFont($font, 10);
-        $y = $this->totals($page, $data['pre_refund'], $currency, $y);
-
-        $y -= 8;
-        $page->setFont($bold, 11);
-        $y = $this->line($page, 'Refund', $y, 14);
-        $page->setFont($font, 10);
-        $this->totals($page, $data['refund'], $currency, $y);
-
-        return $pdf->render();
+        return $this->documentFactory->create()->getPdf([$this->buildData($refund)])->render();
     }
 
     /**
-     * @param array<string, string> $totals
+     * Group immutable stored amounts by business tax code and rate.
+     *
+     * @param RefundFigureLine[] $lines
+     * @return array<int, array<string, string>>
      */
-    private function totals(\Zend_Pdf_Page $page, array $totals, string $currency, float $y): float
+    private function taxGroups(array $lines): array
     {
-        $y = $this->line($page, 'Product Subtotal: ' . $this->money($totals['subtotal'], $currency), $y);
-        $y = $this->line($page, 'Shipping: ' . $this->money($totals['shipping'], $currency), $y);
-        $y = $this->line($page, 'Consumption Tax: ' . $this->money($totals['tax'], $currency), $y);
-        $y = $this->line($page, 'Total: ' . $this->money($totals['grand_total'], $currency), $y);
+        $groups = [];
+        foreach ($lines as $line) {
+            $key = $line->taxCode . '|' . $line->taxRate;
+            if (!isset($groups[$key])) {
+                $groups[$key] = [
+                    'code' => $line->taxCode, 'rate' => $line->taxRate,
+                    'taxable' => '0.0000', 'tax' => '0.0000',
+                ];
+            }
+            $groups[$key]['taxable'] = bcadd(
+                $groups[$key]['taxable'],
+                bcadd($line->rowAmount, $line->shippingAmount, 4),
+                4
+            );
+            $groups[$key]['tax'] = bcadd($groups[$key]['tax'], $line->taxAmount, 4);
+        }
+        ksort($groups);
 
-        return $y;
+        return array_values($groups);
     }
 
-    private function line(\Zend_Pdf_Page $page, string $text, float $y, int $step = 14): float
+    /**
+     * Use Magento's store/currency presentation without changing snapshot amounts.
+     *
+     * @param array $amounts
+     * @param int $storeId
+     * @param string $currency
+     * @return array<string, string>
+     */
+    private function formatAmounts(array $amounts, int $storeId, string $currency): array
     {
-        $page->drawText($text, 50, $y, 'UTF-8');
-
-        return $y - $step;
-    }
-
-    private function refundDate(RefundInterface $refund): string
-    {
-        $createdAt = $refund->getCreatedAt();
-        if ($createdAt === null || $createdAt === '') {
-            return $this->timezone->date()->format('Y-m-d');
+        $formatted = [];
+        foreach ($amounts as $key => $amount) {
+            $text = $this->priceCurrency->format(
+                $amount,
+                false,
+                $currency === 'JPY' ? 0 : PriceCurrencyInterface::DEFAULT_PRECISION,
+                $storeId,
+                $currency
+            );
+            // Magento's bundled FreeSerif supports yen, but not its full-width locale variant.
+            $formatted[$key] = str_replace("\u{FFE5}", "\u{00A5}", $text);
         }
 
-        return $this->timezone->date(new \DateTime($createdAt))->format('Y-m-d');
-    }
-
-    private function money(mixed $amount, string $currency): string
-    {
-        return $currency . ' ' . number_format((float) $amount, 0, '.', ',');
-    }
-
-    private function ascii(string $value): string
-    {
-        $converted = @iconv('UTF-8', 'ASCII//TRANSLIT', $value);
-        if ($converted === false) {
-            $converted = (string) preg_replace('/[^\x20-\x7E]/', '?', $value);
-        }
-
-        return (string) preg_replace('/[^\x20-\x7E]/', '?', $converted);
+        return $formatted;
     }
 }
