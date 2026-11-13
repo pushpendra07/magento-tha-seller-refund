@@ -310,6 +310,17 @@ class RefundTotalCalculator
 
     private function num(mixed $value): string
     {
+        // Decimal columns arrive as strings: normalise them with bcmath so no digit is lost to a
+        // binary float (FRD 11: decimal money). Half-up rounding at 4 places, away from zero.
+        $text = is_int($value) ? (string) $value : (is_string($value) ? trim($value) : null);
+        if ($text !== null && preg_match('/^[+-]?\d+(\.\d+)?$/', $text) === 1) {
+            $text = ltrim($text, '+');
+            $half = str_starts_with($text, '-') ? '-0.00005' : '0.00005';
+
+            return bcadd($text, $half, self::SCALE);
+        }
+
+        // A float handed over by a caller is already binary; keep the previous rounding for it.
         return sprintf('%.4F', (float) $value);
     }
 }

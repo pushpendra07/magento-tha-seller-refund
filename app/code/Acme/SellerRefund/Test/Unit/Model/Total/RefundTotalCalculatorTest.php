@@ -205,6 +205,29 @@ class RefundTotalCalculatorTest extends TestCase
     }
 
     /**
+     * Decimal columns arrive as strings. A float has about 15 significant digits, so converting
+     * 1234567890123.4567 through one gave 1234567890123.4568 (FRD 11: decimal money).
+     */
+    public function testDecimalStringsKeepEveryDigit(): void
+    {
+        $item = $this->createMock(OrderItem::class);
+        $item->method('getPrice')->willReturn('1234567890123.4567');
+        $item->method('getQtyOrdered')->willReturn('2.0000');
+        $item->method('getData')->willReturn(101);
+        $item->method('getSku')->willReturn('SELLER-RED-01');
+        $item->method('getName')->willReturn('Seller Red Widget');
+
+        $figures = $this->calculator([1 => $item])->fromSelection(
+            $this->order('0.0000'),
+            [1 => '1'],
+            [],
+            new DateTimeImmutable()
+        );
+
+        self::assertSame('1234567890123.4567', $figures->lines[0]->rowAmount);
+    }
+
+    /**
      * @param array<int, OrderItem&MockObject> $sellerLines
      */
     private function calculator(array $sellerLines): RefundTotalCalculator
