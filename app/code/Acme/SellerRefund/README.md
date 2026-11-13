@@ -33,6 +33,22 @@ The module adds these order attributes, which the seller order import must fill:
 | `sales_order_item.mp_seller_code` | Marks the line as a seller item |
 | `sales_order_item.mp_tax_class` | Business tax code `999` / `010` / `008` (FRD 11) |
 
+## Database
+
+Declared in `etc/db_schema.xml` (declarative schema) with `etc/db_schema_whitelist.json`.
+
+| Table | Holds | Main indexes |
+|---|---|---|
+| `mp_refund` | One row per refund: status, sub-statuses, money snapshot, ERP id, bank transfer | unique `refund_no`; `order_id`; `status, created_at` |
+| `mp_refund_item` | Refunded lines (snapshot, never edited) | `refund_id`; `order_item_id` |
+| `mp_refund_event` | Append-only audit log with redacted request/response | `refund_id, created_at` |
+| `mp_refund_outbox` | Queued ERP calls (`pending`, `done`, `dead`, `cancelled`) | `state, available_at`; `refund_id, operation, state` |
+| `mp_refund_sequence` | Daily counter behind `SR-YYYYMMDD-NNNNNN` | `date_key` |
+
+`Setup/Patch/Schema/DropImplicitOutboxRefundIndex` removes an older, undeclared `refund_id`
+index that MySQL/MariaDB created for the outbox foreign key on installs from before
+`MP_REFUND_OUTBOX_REFUND_ID_OPERATION_STATE` was declared. It does nothing on a fresh install.
+
 ## Configuration
 
 **Stores > Configuration > Seller Refund > Seller Refund**
@@ -71,9 +87,18 @@ the client and is listed in `submission/06-questions-and-next-steps.md`.
 | Reissued receipt PDF | Detail page, and the link shown after submit | `Acme_SellerRefund::receipt` |
 
 **Grid.** The grid is a standard UI component listing (`acme_refund_listing`). It has paging,
-page size, sorting, column controls and saved views. You can filter by refund number, order
-number, seller order, status, ERP create status, type, refund total range and created date
-range. Rows load in one query: the order and the line summary are joined, not loaded per row.
+page size, sorting, column controls and saved views, and lists the newest refunds first by
+default. You can filter by refund number, order number, seller order, status, ERP Create /
+Status Check / Confirm status, type, refund total range, created date range and **Needs
+Attention**. Needs Attention is Yes when an ERP call was rejected, conflicted, failed the local
+payload check or ran out of retries, or when an outbox job was dead-lettered and not replayed
+since; a call the outbox is still retrying is not flagged. Rows load in one query: the order and
+the line summary are joined, not loaded per row.
+
+**Refund detail.** Refund, order and ERP panels, the totals, the action panel and the audit
+log. Each integration error in the log shows its correlation id ("Ref: …"), the
+`X-Correlation-Id` the ERP received, so an operator can quote it to the ERP team (FRD 14). The
+confirmation email's outcome is logged too (Succeeded, Not sent or Skipped).
 
 **Create form.** The form lists the order's seller lines with the ordered quantity, the
 quantity already refunded and the quantity remaining. Totals are recalculated on the server as
@@ -101,6 +126,7 @@ Each ERP call also has a sub-status (`create_status`, `status_check_status`,
 | `business_rejected` | The ERP refused the request; the refund becomes `failed` |
 | `conflict` | 409: the ERP already has this `refund_no` with a different payload. The refund stays `calculated`, keeps its quantity and waits for reconciliation |
 | `invalid_payload` | The request failed the local check in `Model/Erp/PayloadValidator` and was never sent |
+| `retries_exhausted` | The outbox used its last allowed attempt and dead-lettered the job; an operator replay sets it back to `pending` |
 
 ## ERP integration
 
@@ -140,14 +166,15 @@ Customers see their refunds in two places, built from the stored refund snapshot
   pre-refund total and a separate refund section (refund date, product subtotal, shipping,
   ex-tax amount, consumption tax, total).
 - **My Orders** (`sales_order_history`): a "Refunded Orders" list showing each refund, its total
-  and the refunded items.
+  and the refunded items, newest order first like the My Orders list above it.
 
 Draft, failed and cancelled refunds are not shown, because no money will be paid for them
 (`Model/Presentation/CustomerVisibleRefunds`).
 
 The confirmation email (`acme_seller_refund_email_confirmation_template`) is sent after the
 ERP confirms. It is rendered in the frontend area, so it also works when the cron worker sends
-it.
+it. Its outcome is written to the refund's audit log; a mail failure never affects the
+confirmed refund.
 
 The event `acme_seller_refund_confirmed` is dispatched when a refund reaches `erp_confirmed`.
 
@@ -165,8 +192,8 @@ The event `acme_seller_refund_confirmed` is dispatched when a refund reaches `er
 ## Tests
 
 ```bash
-bin/assignment-test unit           # 68 tests
-bin/assignment-test integration    # 14 tests, each in a rolled-back transaction
+bin/assignment-test unit           # 73 tests
+bin/assignment-test integration    # 21 tests, each in a rolled-back transaction
 bin/assignment-test smoke          # storefront, admin, ERP stub, Create happy path
 bin/assignment-test all
 bin/assignment-test unit --filter RefundValidatorTest
@@ -183,5 +210,6 @@ transaction, so they do not depend on today's date.
 | Admin JavaScript stops working after a deploy | `pub/static/deployed_version.txt` must not end with a newline |
 | A refund stays `calculated` with `retryable_error` | Is the ERP reachable? Is cron running? The outbox row shows `attempts`, `available_at` and `last_error` |
 | A refund shows `conflict` | The ERP already holds this `refund_no` with a different payload; resolve it with the ERP team before replaying |
-| A job is dead | Use Retry on the detail page after fixing the cause; the reconciler does not re-queue it |
-| Email not sent from cron | Check `var/log/exception.log` |
+| A refund shows "Retries exhausted, needs replay" | The outbox gave up after Max Attempts. Fix the cause, then use Retry on the detail page; the reconciler does not re-queue dead jobs |
+| The audit log shows "Email confirmation: Not sent" | The mail transport failed; the reason is in `var/log/system.log` and `var/log/exception.log` |
+| The grid ignores the default sort | Your saved grid view keeps your last sort; choose **Default View** |
