@@ -31,6 +31,7 @@ use Acme\SellerRefund\Model\SellerLineResolver;
 use Acme\SellerRefund\Model\Total\RefundTotalCalculator;
 use Acme\SellerRefund\Service\RefundProcessor;
 use Magento\Framework\App\ResourceConnection;
+use Magento\Framework\DB\Adapter\AdapterInterface;
 use Magento\Framework\Event\ManagerInterface as EventManagerInterface;
 use Magento\Framework\Stdlib\DateTime\TimezoneInterface;
 use Magento\Sales\Api\OrderRepositoryInterface;
@@ -65,6 +66,16 @@ class RefundProcessorTest extends TestCase
      */
     private TimezoneInterface&MockObject $timezone;
 
+    /**
+     * @var ResourceConnection|MockObject
+     */
+    private $resource;
+
+    /**
+     * @var Outbox|MockObject
+     */
+    private $outbox;
+
     private RefundProcessor $processor;
 
     protected function setUp(): void
@@ -78,10 +89,12 @@ class RefundProcessorTest extends TestCase
         $this->payloadValidator = $this->createMock(PayloadValidator::class);
         $this->timezone = $this->createMock(TimezoneInterface::class);
         $this->timezone->method('date')->willReturn(new \DateTime('2026-11-12'));
+        $this->resource = $this->createMock(ResourceConnection::class);
+        $this->outbox = $this->createMock(Outbox::class);
 
         $this->processor = new RefundProcessor(
             $this->refundRepository,
-            $this->createMock(ResourceConnection::class),
+            $this->resource,
             $this->createMock(OrderLock::class),
             $this->orderRepository,
             $this->createMock(PriorRefundQuantity::class),
@@ -94,7 +107,7 @@ class RefundProcessorTest extends TestCase
             $this->createMock(RefundItemResource::class),
             $this->createMock(SellerLineResolver::class),
             $this->eventRecorder,
-            $this->createMock(Outbox::class),
+            $this->outbox,
             $this->stateMachine,
             $this->client,
             $this->payloadBuilder,
@@ -248,6 +261,57 @@ class RefundProcessorTest extends TestCase
         $this->stateMachine->expects(self::never())->method('transition');
 
         $this->processor->process(7);
+    }
+
+    /**
+     * The move to erp_confirm_pending and the Confirm job are committed together: when queueing
+     * the job fails, the state change is rolled back, so a refund is never left waiting for a
+     * Confirm that nothing will send.
+     */
+    public function testConfirmPendingIsRolledBackWhenTheConfirmJobCannotBeQueued(): void
+    {
+        $refund = $this->createMock(RefundInterface::class);
+        $refund->method('getStatus')->willReturn(RefundInterface::STATUS_CASH_REFUNDED);
+        $refund->method('getErpRefundId')->willReturn('ERP-8000123');
+        $this->refundRepository->method('getById')->with(7)->willReturn($refund);
+        $this->client->method('readStatus')->willReturn([
+            'erp_refund_id' => 'ERP-8000123',
+            'status' => 'refund-pending',
+        ]);
+
+        $connection = $this->createMock(AdapterInterface::class);
+        $this->resource->method('getConnection')->willReturn($connection);
+        $calls = [];
+        $connection->method('beginTransaction')->willReturnCallback(
+            function () use (&$calls, $connection) {
+                $calls[] = 'begin';
+
+                return $connection;
+            }
+        );
+        $this->stateMachine->expects(self::once())->method('transition')->willReturnCallback(
+            function () use (&$calls): void {
+                $calls[] = 'transition';
+            }
+        );
+        $this->outbox->expects(self::once())->method('enqueue')
+            ->with(7, Outbox::OP_CONFIRM)
+            ->willThrowException(new \RuntimeException('Lost connection to the database.'));
+        $connection->expects(self::never())->method('commit');
+        $connection->expects(self::once())->method('rollBack')->willReturnCallback(
+            function () use (&$calls, $connection) {
+                $calls[] = 'rollBack';
+
+                return $connection;
+            }
+        );
+
+        try {
+            $this->processor->checkStatus(7);
+            self::fail('The enqueue failure must reach the outbox worker.');
+        } catch (\RuntimeException $e) {
+            self::assertSame(['begin', 'transition', 'rollBack'], $calls);
+        }
     }
 
     /**

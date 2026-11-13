@@ -258,21 +258,47 @@ class RefundProcessor
         $txnDate = trim($txnDate);
 
         $refund = $this->refundRepository->getById($refundId);
-        $this->stateMachine->transition(
-            $refund,
-            RefundInterface::STATUS_CASH_REFUNDED,
-            RefundEventInterface::TYPE_CASH_REGISTERED,
-            [
-                RefundInterface::CASH_REFUND_STATUS => RefundInterface::SUB_SUCCEEDED,
-                RefundInterface::TRANSACTION_NUMBER => $txnNumber,
-                RefundInterface::TRANSACTION_DATE => $txnDate,
-            ],
-            $actorId
-        );
-        $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_CASH_REGISTERED, RefundInterface::SUB_SUCCEEDED, [
-            'created_by' => $actorId,
-        ]);
-        $this->outbox->enqueue($refundId, Outbox::OP_STATUS_CHECK);
+        // The registration, its audit entry and the status-check job are committed together.
+        $this->inTransaction(function () use ($refund, $refundId, $txnNumber, $txnDate, $actorId): void {
+            $this->stateMachine->transition(
+                $refund,
+                RefundInterface::STATUS_CASH_REFUNDED,
+                RefundEventInterface::TYPE_CASH_REGISTERED,
+                [
+                    RefundInterface::CASH_REFUND_STATUS => RefundInterface::SUB_SUCCEEDED,
+                    RefundInterface::TRANSACTION_NUMBER => $txnNumber,
+                    RefundInterface::TRANSACTION_DATE => $txnDate,
+                ],
+                $actorId
+            );
+            $this->eventRecorder->record(
+                $refundId,
+                RefundEventInterface::TYPE_CASH_REGISTERED,
+                RefundInterface::SUB_SUCCEEDED,
+                ['created_by' => $actorId]
+            );
+            $this->outbox->enqueue($refundId, Outbox::OP_STATUS_CHECK);
+        });
+    }
+
+    /**
+     * Runs the given writes in one database transaction, so a state change and the job that
+     * follows it are committed together or not at all.
+     *
+     * @param callable $work
+     * @return void
+     */
+    private function inTransaction(callable $work): void
+    {
+        $connection = $this->resource->getConnection();
+        $connection->beginTransaction();
+        try {
+            $work();
+            $connection->commit();
+        } catch (\Throwable $e) {
+            $connection->rollBack();
+            throw $e;
+        }
     }
 
     public function checkStatus(int $refundId, int $attemptNo = 1): void
@@ -337,13 +363,17 @@ class RefundProcessor
             'attempt_no' => $attemptNo,
             'response_payload' => $response,
         ]);
-        $this->stateMachine->transition(
-            $refund,
-            RefundInterface::STATUS_ERP_CONFIRM_PENDING,
-            RefundEventInterface::TYPE_ERP_STATUS,
-            [RefundInterface::STATUS_CHECK_STATUS => RefundInterface::SUB_SUCCEEDED]
-        );
-        $this->outbox->enqueue($refundId, Outbox::OP_CONFIRM);
+        // The new state and its Confirm job are committed together: if only the state were saved,
+        // nothing would ever send the Confirm (the reconciler only looks at cash_refunded).
+        $this->inTransaction(function () use ($refund, $refundId): void {
+            $this->stateMachine->transition(
+                $refund,
+                RefundInterface::STATUS_ERP_CONFIRM_PENDING,
+                RefundEventInterface::TYPE_ERP_STATUS,
+                [RefundInterface::STATUS_CHECK_STATUS => RefundInterface::SUB_SUCCEEDED]
+            );
+            $this->outbox->enqueue($refundId, Outbox::OP_CONFIRM);
+        });
     }
 
     public function confirm(int $refundId, int $attemptNo = 1): void
