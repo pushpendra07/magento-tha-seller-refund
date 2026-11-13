@@ -13,6 +13,7 @@ define([
             calculateUrl: '',
             saveUrl: '',
             formKey: '',
+            submissionToken: '',
             orderId: '',
             currency: 'JPY',
             priceFormat: null,
@@ -332,6 +333,7 @@ define([
                 dataType: 'json',
                 data: {
                     form_key: this.options.formKey,
+                    submission_token: this.options.submissionToken,
                     order_id: this.options.orderId,
                     reason_code: this.element.find(this.options.selectors.reason).val(),
                     items: this._collectItems()

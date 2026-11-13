@@ -36,6 +36,7 @@ class SaveTest extends TestCase
         $request->method('getParams')->willReturn([
             'order_id' => '100',
             'reason_code' => 'damaged',
+            'submission_token' => str_repeat('a', 32),
             'items' => [501 => '1'],
         ]);
         $context = $this->createMock(Context::class);

@@ -34,6 +34,7 @@ use Acme\SellerRefund\Model\SellerLineResolver;
 use Acme\SellerRefund\Model\Submission\RefundSubmission;
 use Acme\SellerRefund\Model\Total\RefundTotalCalculator;
 use Magento\Framework\App\ResourceConnection;
+use Magento\Framework\DB\Adapter\DuplicateException;
 use Magento\Framework\Event\ManagerInterface as EventManagerInterface;
 use Magento\Framework\Stdlib\DateTime\TimezoneInterface;
 use Magento\Sales\Api\OrderRepositoryInterface;
@@ -101,6 +102,11 @@ class RefundProcessor
         try {
             $this->orderLock->lock($orderId);
             $order = $this->orderRepository->get($orderId);
+            $previous = $this->previousSubmission($orderId, $submission);
+            if ($previous !== null) {
+                $connection->commit();
+                return $previous;
+            }
 
             // BR-01/BR-02 are enforced here, under the order lock, not only by hiding the
             // admin button: a direct request must not refund an expired or ineligible order.
@@ -138,6 +144,11 @@ class RefundProcessor
                 ->setVersion(1)
                 ->setCreatedBy($submission->actorId)
                 ->setUpdatedBy($submission->actorId);
+            $refund->setData('submission_token', $submission->submissionToken);
+            $refund->setData(
+                'submission_fingerprint',
+                $submission->submissionToken !== null ? $submission->getFingerprint() : null
+            );
             $this->refundResource->save($refund);
             $refundId = (int) $refund->getEntityId();
 
@@ -154,10 +165,44 @@ class RefundProcessor
             $connection->commit();
         } catch (\Throwable $e) {
             $connection->rollBack();
+            if ($e instanceof DuplicateException && $submission->submissionToken !== null) {
+                $previous = $this->previousSubmission($orderId, $submission);
+                if ($previous !== null) {
+                    return $previous;
+                }
+            }
             throw $e;
         }
 
         return $refund;
+    }
+
+    /**
+     * Return the original result before checking quantities or dates again on a retry.
+     *
+     * @param int $orderId
+     * @param RefundSubmission $submission
+     * @return RefundInterface|null
+     * @throws ValidationException
+     */
+    private function previousSubmission(int $orderId, RefundSubmission $submission): ?RefundInterface
+    {
+        if ($submission->submissionToken === null) {
+            return null;
+        }
+        $row = $this->refundResource->findSubmission($submission->submissionToken);
+        if ($row === null) {
+            return null;
+        }
+        if ((int) $row['order_id'] !== $orderId
+            || !hash_equals((string) $row['submission_fingerprint'], $submission->getFingerprint())
+        ) {
+            throw new ValidationException(
+                __('This request was already used for different refund details. Reload the form.')
+            );
+        }
+
+        return $this->refundRepository->getById((int) $row['entity_id']);
     }
 
     public function process(int $refundId, int $attemptNo = 1): void

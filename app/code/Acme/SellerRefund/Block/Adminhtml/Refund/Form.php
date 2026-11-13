@@ -26,6 +26,9 @@ class Form extends Template
 {
     private ?OrderInterface $order = null;
 
+    /** @var string|null */
+    private ?string $submissionToken = null;
+
     /**
      * @var array<int, string>|null order item id => quantity already refunded (read once)
      */
@@ -149,6 +152,7 @@ class Form extends Template
             'calculateUrl' => $this->getUrl('acme_refund/refund/calculate'),
             'saveUrl' => $this->getUrl('acme_refund/refund/save'),
             'formKey' => $this->formKeyProvider->getFormKey(),
+            'submissionToken' => $this->submissionToken ??= bin2hex(random_bytes(16)),
             'orderId' => (string) $this->getOrderId(),
             'currency' => $currency !== '' ? $currency : 'JPY',
             'priceFormat' => $this->localeFormat->getPriceFormat(null, $currency !== '' ? $currency : 'JPY'),
