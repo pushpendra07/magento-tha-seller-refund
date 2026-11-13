@@ -70,6 +70,23 @@ class Collection extends SearchResult
     }
 
     /**
+     * Newest refunds first unless the operator chose a sort.
+     *
+     * The primary key follows insertion order, so this matches created_at order without an extra
+     * index on created_at. A column the operator sorts by is used as given.
+     *
+     * @return $this
+     */
+    protected function _renderOrders()
+    {
+        if (empty($this->_orders)) {
+            $this->setOrder('main_table.entity_id', self::SORT_ORDER_DESC);
+        }
+
+        return parent::_renderOrders();
+    }
+
+    /**
      * SQL for "needs an operator": an ERP call that will not succeed on its own.
      *
      * That is a business reject, a 409 conflict or a request that failed the local check on any

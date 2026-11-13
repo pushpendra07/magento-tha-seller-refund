@@ -102,6 +102,36 @@ class RefundGridTest extends DbTransactionTestCase
     }
 
     /**
+     * Newest refunds first by primary key when the operator has not chosen a sort, which the
+     * primary key serves without an extra index.
+     */
+    public function testDefaultOrderIsNewestFirstByPrimaryKey(): void
+    {
+        $this->addRefunds(3);
+        $grid = $this->grid()->setPageSize(20)->setCurPage(1);
+
+        $ids = array_map('intval', array_keys($grid->getItems()));
+        self::assertStringContainsString('ORDER BY main_table.entity_id DESC', (string) $grid->getSelect());
+        $sorted = $ids;
+        rsort($sorted);
+        self::assertSame($sorted, $ids);
+    }
+
+    /**
+     * A column the operator sorts by replaces the default.
+     */
+    public function testOperatorSortReplacesTheDefault(): void
+    {
+        $grid = $this->grid();
+        $grid->addOrder('grand_total', 'ASC');
+        $grid->load();
+        $select = (string) $grid->getSelect();
+
+        self::assertStringContainsString('grand_total ASC', $select);
+        self::assertStringNotContainsString('entity_id DESC', $select);
+    }
+
+    /**
      * A fresh grid collection, as the admin grid's data provider builds it.
      *
      * @return AbstractDb

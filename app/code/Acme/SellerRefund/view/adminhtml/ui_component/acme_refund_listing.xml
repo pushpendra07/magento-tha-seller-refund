@@ -137,7 +137,6 @@
                 <filter>dateRange</filter>
                 <dataType>date</dataType>
                 <label translate="true">Created At</label>
-                <sorting>desc</sorting>
             </settings>
         </column>
         <actionsColumn name="actions" class="Acme\SellerRefund\Ui\Component\Listing\Column\RefundActions"
