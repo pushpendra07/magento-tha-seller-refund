@@ -1,0 +1,45 @@
+/* Create Seller Refund: only what Magento's admin styles do not already cover. */
+.acme-refund-form [hidden] {
+    display: none !important;
+}
+.acme-refund-form .acme-refund-items-toolbar {
+    margin-bottom: 1.5rem;
+    text-align: right;
+}
+.acme-refund-form .acme-refund-items-toolbar button {
+    margin-left: 1rem;
+}
+.acme-refund-form .acme-refund-summary {
+    display: flex;
+    gap: 4rem;
+}
+.acme-refund-form .acme-refund-summary > .admin__page-section-item {
+    flex: 1;
+    float: none;
+    width: auto;
+}
+.acme-refund-form .acme-refund-summary .admin__field {
+    margin-bottom: 2.5rem;
+}
+.acme-refund-form .acme-refund-lines .qty-input {
+    width: 8rem;
+}
+.acme-refund-form .acme-refund-lines .admin__field-error {
+    margin-top: 0.5rem;
+}
+.acme-refund-form .acme-refund-line-locked td {
+    color: #8a8a8a;
+}
+.acme-refund-form .acme-refund-fully-refunded {
+    font-style: italic;
+}
+.acme-refund-form .acme-refund-days-left {
+    color: #6d6d6d;
+}
+.acme-refund-form .acme-refund-actions {
+    margin-top: 2rem;
+    text-align: right;
+}
+.acme-refund-form .acme-refund-state {
+    margin-top: 1.5rem;
+}

@@ -50,12 +50,45 @@ class RefundEligibility
         return new EligibilityResult($reasons === [], $reasons);
     }
 
+    /**
+     * Last moment a refund may be submitted for the order: delivery date plus the refund window.
+     *
+     * Null when the order has no delivery date. Used by the eligibility check and shown in admin.
+     *
+     * @param OrderInterface $order
+     * @param \DateTimeZone $timezone
+     * @return DateTimeImmutable|null
+     */
+    public function deadline(OrderInterface $order, \DateTimeZone $timezone): ?DateTimeImmutable
+    {
+        $deliveredAt = $order->getData('mp_delivered_at');
+        if ($deliveredAt === null || $deliveredAt === '') {
+            return null;
+        }
+
+        return $this->deadlineFrom((string) $deliveredAt, $timezone, (int) $order->getStoreId());
+    }
+
     private function withinWindow(string $deliveredAt, DateTimeInterface $now, int $storeId): bool
     {
-        $delivered = new DateTimeImmutable($deliveredAt, $now->getTimezone());
-        $deadline = $delivered->modify(sprintf('+%d days', $this->config->windowDays($storeId)));
+        $deadline = $this->deadlineFrom($deliveredAt, $now->getTimezone(), $storeId);
 
         return $now->getTimestamp() <= $deadline->getTimestamp();
+    }
+
+    /**
+     * Delivery date plus the configured refund window.
+     *
+     * @param string $deliveredAt
+     * @param \DateTimeZone $timezone
+     * @param int $storeId
+     * @return DateTimeImmutable
+     */
+    private function deadlineFrom(string $deliveredAt, \DateTimeZone $timezone, int $storeId): DateTimeImmutable
+    {
+        $delivered = new DateTimeImmutable($deliveredAt, $timezone);
+
+        return $delivered->modify(sprintf('+%d days', $this->config->windowDays($storeId)));
     }
 
     /**

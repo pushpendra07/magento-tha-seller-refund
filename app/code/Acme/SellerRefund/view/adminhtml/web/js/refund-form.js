@@ -1,10 +1,11 @@
 define([
     'jquery',
     'mage/translate',
+    'Magento_Catalog/js/price-utils',
     'Magento_Ui/js/modal/confirm',
     'Magento_Ui/js/modal/alert',
     'jquery-ui-modules/widget'
-], function ($, $t, confirm, alert) {
+], function ($, $t, priceUtils, confirm, alert) {
     'use strict';
 
     $.widget('acme.acmeRefundForm', {
@@ -14,12 +15,18 @@ define([
             formKey: '',
             orderId: '',
             currency: 'JPY',
+            priceFormat: null,
             selectors: {
                 qtyInput: '[data-role="qty-input"]',
+                qtyError: '[data-role="qty-error"]',
                 lineRow: '[data-role="line-row"]',
                 lineAmount: '[data-role="line-amount"]',
-                remaining: '[data-role="remaining"]',
+                refundSubtotal: '[data-role="refund-subtotal"]',
+                refundShipping: '[data-role="refund-shipping"]',
+                refundTax: '[data-role="refund-tax"]',
                 grandTotal: '[data-role="grand-total"]',
+                refundAll: '[data-role="refund-all"]',
+                clear: '[data-role="clear"]',
                 submit: '[data-role="submit"]',
                 reason: '[data-role="reason"]',
                 state: '[data-role="state"]',
@@ -34,7 +41,9 @@ define([
             this.lastGrandTotal = '0';
             this.calcRequested = 0;
             this.calcPainted = 0;
-            this._on(this.element.find(this.options.selectors.qtyInput), {change: '_recalculate'});
+            this._on(this.element.find(this.options.selectors.qtyInput), {change: '_onQtyChange'});
+            this._on(this.element.find(this.options.selectors.refundAll), {click: '_refundAll'});
+            this._on(this.element.find(this.options.selectors.clear), {click: '_clear'});
             this._on(this.element.find(this.options.selectors.submit), {click: '_onSubmit'});
         },
 
@@ -59,8 +68,109 @@ define([
         },
 
         /**
-         * Server-side recalculation on every quantity change. Responses can arrive out of order,
-         * so each request is numbered and only the newest one may repaint the totals.
+         * Check one quantity field: a whole number from 0 up to the remaining quantity (BR-03).
+         * The server checks again on save; this tells the operator at once.
+         *
+         * @param {jQuery} input
+         * @return {String} an error message, or an empty string when the value is valid
+         */
+        _validateField: function (input) {
+            var raw = $.trim(input.val()),
+                qty = Number(raw),
+                remaining = Number(input.closest(this.options.selectors.lineRow).data('remaining'));
+
+            if (raw === '' || qty === 0) {
+                return '';
+            }
+            if (!Number.isInteger(qty) || qty < 0) {
+                return $t('Enter a whole number of 0 or more.');
+            }
+            if (qty > remaining) {
+                return $t('Maximum %1 (the remaining quantity).').replace('%1', remaining);
+            }
+
+            return '';
+        },
+
+        /**
+         * Show or clear the inline error under one field.
+         *
+         * @param {jQuery} input
+         * @param {String} message
+         */
+        _markField: function (input, message) {
+            var error = input.closest('td').find(this.options.selectors.qtyError);
+
+            input.toggleClass('mage-error', message !== '').attr('aria-invalid', message !== '');
+            error.text(message).prop('hidden', message === '');
+        },
+
+        /**
+         * Validate every field; returns true when all are valid.
+         *
+         * @return {Boolean}
+         */
+        _validateAll: function () {
+            var self = this,
+                valid = true;
+
+            this.element.find(this.options.selectors.qtyInput).each(function () {
+                var message = self._validateField($(this));
+
+                self._markField($(this), message);
+                valid = valid && message === '';
+            });
+
+            return valid;
+        },
+
+        /**
+         * A quantity changed: validate it, and recalculate only when every field is valid. While a
+         * field is invalid the amounts are blanked, so no total is shown that does not match the
+         * quantities on screen, and any calculation still in flight is ignored.
+         */
+        _onQtyChange: function (event) {
+            var input = $(event.currentTarget);
+
+            this._markField(input, this._validateField(input));
+            if (this._validateAll()) {
+                this._recalculate();
+            } else {
+                this._clearAmounts();
+            }
+        },
+
+        /** Blank the line amounts and refund totals until the quantities are valid again. */
+        _clearAmounts: function () {
+            var s = this.options.selectors;
+
+            this.calcRequested++;
+            this.lastGrandTotal = '0';
+            this.element.find([s.lineAmount, s.refundSubtotal, s.refundShipping, s.refundTax, s.grandTotal].join(','))
+                .html('&mdash;');
+        },
+
+        /** Fill every editable line with its remaining quantity; one recalculation for all. */
+        _refundAll: function () {
+            var self = this;
+
+            this.element.find(this.options.selectors.qtyInput).each(function () {
+                $(this).val($(this).closest(self.options.selectors.lineRow).data('remaining'));
+            });
+            this._validateAll();
+            this._recalculate();
+        },
+
+        /** Reset every line to 0; one recalculation for all. */
+        _clear: function () {
+            this.element.find(this.options.selectors.qtyInput).val('0');
+            this._validateAll();
+            this._recalculate();
+        },
+
+        /**
+         * Server-side recalculation (FRD 10.1). Responses can arrive out of order, so each request
+         * is numbered and only the newest one may repaint the totals.
          */
         _recalculate: function () {
             var self = this,
@@ -82,24 +192,31 @@ define([
                 if (response.ok && response.figures) {
                     self._paint(response.figures);
                     self.calcPainted = requestNo;
+                } else if (response.message) {
+                    self._setState(response.message, 'warning');
                 }
             });
         },
 
-        /** Repaint the per-line amounts and the grand total from the server figures. */
+        /** Repaint the per-line amounts and the refund totals from the server figures. */
         _paint: function (figures) {
-            var self = this;
+            var self = this,
+                s = this.options.selectors;
 
-            this.element.find(this.options.selectors.lineAmount).text('-');
+            this.element.find(s.lineAmount).html('&mdash;');
             $.each(figures.lines, function (i, line) {
                 self.element
-                    .find(self.options.selectors.lineRow + '[data-order-item-id="' + line.order_item_id + '"]')
-                    .find(self.options.selectors.lineAmount)
+                    .find(s.lineRow + '[data-order-item-id="' + line.order_item_id + '"]')
+                    .find(s.lineAmount)
                     .text(self._money(line.grand_total));
             });
 
             this.lastGrandTotal = figures.refund.grand_total;
-            this.element.find(this.options.selectors.grandTotal).text(this._money(figures.refund.grand_total));
+            this.element.find(s.refundSubtotal).text(this._money(figures.refund.subtotal));
+            this.element.find(s.refundShipping).text(this._money(figures.refund.shipping));
+            this.element.find(s.refundTax).text(this._money(figures.refund.tax));
+            this.element.find(s.grandTotal).text(this._money(figures.refund.grand_total));
+            this._setState('', '');
         },
 
         /**
@@ -113,45 +230,54 @@ define([
                 selected = 0,
                 error = '';
 
-            this.element.find(this.options.selectors.qtyInput).each(function () {
-                var raw = $.trim($(this).val()),
-                    qty = Number(raw),
-                    row = $(this).closest(self.options.selectors.lineRow),
-                    sku = $.trim(row.find('td').first().text()),
-                    remaining = Number($.trim(row.find(self.options.selectors.remaining).text()));
+            if (!this._validateAll()) {
+                this.element.find(this.options.selectors.qtyInput).each(function () {
+                    var message = self._validateField($(this));
 
-                if (raw === '' || qty === 0) {
+                    if (message) {
+                        error = $(this).closest(self.options.selectors.lineRow).data('sku') + ': ' + message;
+
+                        return false;
+                    }
+
                     return true;
-                }
-                if (!Number.isInteger(qty) || qty < 0) {
-                    error = $t('Enter a whole number of 0 or more for %1.').replace('%1', sku);
+                });
 
-                    return false;
-                }
-                if (qty > remaining) {
-                    error = $t('The refund quantity for %1 exceeds the remaining quantity %2.')
-                        .replace('%1', sku)
-                        .replace('%2', remaining);
-
-                    return false;
-                }
-                selected++;
-
-                return true;
-            });
-
-            if (!error && selected === 0) {
-                error = $t('Select at least one item and a quantity to refund.');
+                return error;
             }
 
-            return error;
+            this.element.find(this.options.selectors.qtyInput).each(function () {
+                if (Number($.trim($(this).val())) > 0) {
+                    selected++;
+                }
+            });
+            if (selected === 0) {
+                return $t('Select at least one item and a quantity to refund.');
+            }
+            if (!this.element.find(this.options.selectors.reason).val()) {
+                return $t('Select a refund reason.');
+            }
+
+            return '';
+        },
+
+        /**
+         * Show a Magento-styled message under the totals, or hide it.
+         *
+         * @param {String} text
+         * @param {String} type success|warning|error|''
+         */
+        _setState: function (text, type) {
+            var state = this.element.find(this.options.selectors.state);
+
+            state.attr('class', 'message' + (type ? ' message-' + type + ' ' + type : ''));
+            state.text(text).prop('hidden', !text);
         },
 
         /**
          * @param {String} message
          */
         _showError: function (message) {
-            this.element.find(this.options.selectors.state).text('');
             if (!message) {
                 return;
             }
@@ -174,8 +300,9 @@ define([
             }
 
             error = this._validateSelection();
-            this._showError(error);
             if (error) {
+                this._showError(error);
+
                 return;
             }
 
@@ -188,7 +315,7 @@ define([
 
             confirm({
                 title: $t('Confirm refund'),
-                content: $t('Refund total:') + ' ' + this._money(this.lastGrandTotal),
+                content: $('<div>').text($t('Refund total:') + ' ' + this._money(this.lastGrandTotal)).html(),
                 actions: {
                     confirm: function () {
                         self._save();
@@ -229,37 +356,32 @@ define([
         },
 
         /**
-         * Render the state the server declared. The confirmed/accepted state is shown only
-         * when the server reports the create succeeded; otherwise the pending-retry state is
-         * shown. The client never invents a lifecycle transition.
+         * Render the state the server declared. The accepted state is shown only when the server
+         * reports the create succeeded; otherwise the pending-retry state is shown. The client
+         * never invents a lifecycle transition (FRD 14).
          */
         _renderServerState: function (response) {
-            var state = this.element.find(this.options.selectors.state),
-                link = this.element.find(this.options.selectors.receiptLink),
-                viewLink = this.element.find(this.options.selectors.viewLink),
-                button = this.element.find(this.options.selectors.submit);
+            var s = this.options.selectors,
+                button = this.element.find(s.submit);
 
             // The refund now exists. The button stays disabled so it cannot be submitted twice
-            // (BR-05), but its label and the locked inputs show that the work is done.
+            // (BR-05), and the inputs lock to show that the work is done.
             button.find('span').text($t('Refund Submitted'));
-            this.element.find(this.options.selectors.qtyInput).prop('disabled', true);
-            this.element.find(this.options.selectors.reason).prop('disabled', true);
+            this.element.find(s.qtyInput + ',' + s.reason + ',' + s.refundAll + ',' + s.clear)
+                .prop('disabled', true);
 
             if (response.create_status === 'succeeded') {
-                state.text($t('Refund submitted and accepted by the ERP.'));
+                this._setState($t('Refund submitted and accepted by the ERP.'), 'success');
             } else {
-                state.text($t('Saved; ERP notification pending retry'));
+                this._setState($t('Saved; ERP notification pending retry'), 'warning');
             }
 
             // BR-11: the receipt is available as soon as the server confirms the record exists.
             if (response.receipt_url) {
-                link.attr('href', response.receipt_url);
-                link.prop('hidden', false);
+                this.element.find(s.receiptLink).attr('href', response.receipt_url).prop('hidden', false);
             }
-
             if (response.redirect_url) {
-                viewLink.attr('href', response.redirect_url);
-                viewLink.prop('hidden', false);
+                this.element.find(s.viewLink).attr('href', response.redirect_url).prop('hidden', false);
             }
         },
 
@@ -273,9 +395,18 @@ define([
             this._showError(message);
         },
 
-        /** @return {String} */
+        /**
+         * Format an amount with Magento's price format for the order currency.
+         *
+         * @param {String|Number} amount
+         * @return {String}
+         */
         _money: function (amount) {
             var value = parseFloat(amount || 0);
+
+            if (this.options.priceFormat) {
+                return priceUtils.formatPrice(value, this.options.priceFormat);
+            }
 
             return this.options.currency + ' ' + value.toLocaleString('en-US', {maximumFractionDigits: 0});
         }

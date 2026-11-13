@@ -4,15 +4,19 @@ declare(strict_types=1);
 
 namespace Acme\SellerRefund\Block\Adminhtml\Refund;
 
+use Acme\SellerRefund\Model\RefundEligibility;
 use Acme\SellerRefund\Model\ResourceModel\PriorRefundQuantity;
 use Acme\SellerRefund\Model\SellerLineResolver;
 use Acme\SellerRefund\Model\Source\RefundReason;
 use Acme\SellerRefund\Model\Tax\LineTaxRate;
 use Acme\SellerRefund\Model\Tax\TaxCodeResolver;
+use Acme\SellerRefund\Model\Total\RefundFigures;
+use Acme\SellerRefund\Model\Total\RefundTotalCalculator;
 use Magento\Backend\Block\Template;
 use Magento\Backend\Block\Template\Context;
 use Magento\Backend\Block\Widget\Button;
 use Magento\Framework\Data\Form\FormKey;
+use Magento\Framework\Locale\FormatInterface;
 use Magento\Sales\Api\Data\OrderInterface;
 use Magento\Sales\Api\OrderRepositoryInterface;
 
@@ -24,6 +28,11 @@ class Form extends Template
 {
     private ?OrderInterface $order = null;
 
+    /**
+     * @var array<int, string>|null order item id => quantity already refunded (read once)
+     */
+    private ?array $prior = null;
+
     public function __construct(
         Context $context,
         private readonly OrderRepositoryInterface $orderRepository,
@@ -33,6 +42,9 @@ class Form extends Template
         private readonly LineTaxRate $lineTaxRate,
         private readonly FormKey $formKeyProvider,
         private readonly RefundReason $refundReason,
+        private readonly RefundEligibility $eligibility,
+        private readonly RefundTotalCalculator $calculator,
+        private readonly FormatInterface $localeFormat,
         array $data = []
     ) {
         parent::__construct($context, $data);
@@ -91,7 +103,7 @@ class Form extends Template
     public function getSellerLines(): array
     {
         $order = $this->getOrder();
-        $prior = $this->priorRefundQuantity->sumRefundedByOrderItem($this->getOrderId());
+        $prior = $this->getPriorRefunded();
 
         $lines = [];
         foreach ($this->sellerLineResolver->sellerLines($order) as $orderItemId => $item) {
@@ -127,7 +139,9 @@ class Form extends Template
     }
 
     /**
-     * @return array<string, string>
+     * Configuration for the refund-form widget, including Magento's price format for display.
+     *
+     * @return array<string, mixed>
      */
     public function getJsConfig(): array
     {
@@ -141,11 +155,102 @@ class Form extends Template
             'orderId' => (string) $this->getOrderId(),
             'refundNoPlaceholder' => 'SR-' . date('Ymd') . '-______',
             'currency' => $currency !== '' ? $currency : 'JPY',
+            'priceFormat' => $this->localeFormat->getPriceFormat(null, $currency !== '' ? $currency : 'JPY'),
         ];
     }
 
     public function formatMoney(?string $amount, string $currency = 'JPY'): string
     {
         return $currency . ' ' . number_format((float) $amount, 0, '.', ',');
+    }
+
+    /**
+     * Quantity already refunded per order item; one query per page.
+     *
+     * @return array<int, string>
+     */
+    private function getPriorRefunded(): array
+    {
+        if ($this->prior === null) {
+            $this->prior = $this->priorRefundQuantity->sumRefundedByOrderItem($this->getOrderId());
+        }
+
+        return $this->prior;
+    }
+
+    /**
+     * Order and customer facts for the information panel, from the order already loaded.
+     *
+     * @return array<string, string|int|null>
+     */
+    public function getOrderSummary(): array
+    {
+        $order = $this->getOrder();
+        $timezone = new \DateTimeZone($this->_localeDate->getConfigTimezone());
+        $deadline = $this->eligibility->deadline($order, $timezone);
+        $now = new \DateTimeImmutable('now', $timezone);
+        $deliveredAt = (string) $order->getData('mp_delivered_at');
+        $name = trim((string) $order->getCustomerFirstname() . ' ' . (string) $order->getCustomerLastname());
+
+        return [
+            'increment_id' => (string) $order->getIncrementId(),
+            'order_url' => $this->getBackUrl(),
+            'created_at' => $this->formatDate($order->getCreatedAt(), \IntlDateFormatter::MEDIUM, true),
+            'status' => (string) $order->getStatusLabel(),
+            'seller_order_id' => (string) $order->getData('mp_seller_order_id'),
+            'delivered_at' => $deliveredAt !== '' ? $this->formatDate($deliveredAt, \IntlDateFormatter::MEDIUM) : '',
+            'deadline' => $deadline ? $this->formatDate($deadline, \IntlDateFormatter::MEDIUM) : '',
+            'days_left' => $deadline ? max(0, (int) $now->diff($deadline)->format('%r%a')) : null,
+            'customer_name' => $name !== '' ? $name : (string) __('Guest'),
+            'customer_email' => (string) $order->getCustomerEmail(),
+        ];
+    }
+
+    /**
+     * Pre-refund figures and an empty refund, from data already loaded (no extra request).
+     *
+     * @return RefundFigures
+     */
+    public function getInitialFigures(): RefundFigures
+    {
+        return $this->calculator->fromSelection(
+            $this->getOrder(),
+            [],
+            $this->getPriorRefunded(),
+            $this->_localeDate->date()
+        );
+    }
+
+    /**
+     * Amount in the order's currency format, as the admin order page shows it.
+     *
+     * @param string $amount
+     * @return string
+     */
+    public function formatPrice(string $amount): string
+    {
+        return (string) $this->getOrder()->formatPriceTxt((float) $amount);
+    }
+
+    /**
+     * Quantity without trailing decimals, for example "2" for "2.0000".
+     *
+     * @param string $qty
+     * @return string
+     */
+    public function formatQty(string $qty): string
+    {
+        return rtrim(rtrim(sprintf('%.4F', (float) $qty), '0'), '.');
+    }
+
+    /**
+     * Tax rate as a percentage, for example "10%" for "0.1000".
+     *
+     * @param string $rate
+     * @return string
+     */
+    public function formatRate(string $rate): string
+    {
+        return $this->formatQty(bcmul($rate, '100', 4)) . '%';
     }
 }

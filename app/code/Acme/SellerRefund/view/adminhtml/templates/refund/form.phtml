@@ -1,84 +1,286 @@
 <?php
+/**
+ * Create Seller Refund (FRD 10.1), laid out like Magento's admin order pages.
+ *
+ * Everything shown on load comes from data the block has already read; the widget asks the server
+ * to recalculate on each quantity change (one request per change) and the server re-validates on
+ * submit (BR-03).
+ */
 /** @var \Acme\SellerRefund\Block\Adminhtml\Refund\Form $block */
 /** @var \Magento\Framework\Escaper $escaper */
 $lines = $block->getSellerLines();
 $config = $block->getJsConfig();
-$currency = $config['currency'];
+$summary = $block->getOrderSummary();
+$figures = $block->getInitialFigures();
+$configJson = json_encode($config, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
+$hasRefundable = false;
+foreach ($lines as $line) {
+    if (bccomp((string) $line['qty_remaining'], '0', 4) > 0) {
+        $hasRefundable = true;
+        break;
+    }
+}
 ?>
 <div id="acme-refund-form" class="acme-refund-form">
-    <input type="hidden" name="form_key" value="<?= $block->escapeHtmlAttr($config['formKey']) ?>"/>
-    <input type="hidden" data-role="order-id" name="order_id" value="<?= $block->escapeHtmlAttr($config['orderId']) ?>"/>
+    <input type="hidden" name="form_key" value="<?= $escaper->escapeHtmlAttr($config['formKey']) ?>"/>
+    <input type="hidden" data-role="order-id" name="order_id"
+           value="<?= $escaper->escapeHtmlAttr($config['orderId']) ?>"/>
 
-    <div class="admin__field">
-        <label class="admin__field-label" for="acme-refund-reason"><?= $block->escapeHtml(__('Reason')) ?></label>
-        <div class="admin__field-control">
-            <select id="acme-refund-reason" data-role="reason" name="reason_code">
-                <?php foreach ($block->getReasonOptions() as $option): ?>
-                    <option value="<?= $escaper->escapeHtmlAttr($option['value']) ?>">
-                        <?= $escaper->escapeHtml($option['label']) ?>
-                    </option>
-                <?php endforeach; ?>
-            </select>
+    <section class="admin__page-section order-view-account-information">
+        <div class="admin__page-section-title">
+            <span class="title"><?= $escaper->escapeHtml(__('Order & Account Information')) ?></span>
         </div>
-    </div>
+        <div class="admin__page-section-content">
+            <div class="admin__page-section-item order-information">
+                <div class="admin__page-section-item-title">
+                    <span class="title">
+                        <a href="<?= $escaper->escapeUrl($summary['order_url']) ?>">
+                            <?= $escaper->escapeHtml(__('Order # %1', $summary['increment_id'])) ?>
+                        </a>
+                    </span>
+                </div>
+                <div class="admin__page-section-item-content">
+                    <table class="admin__table-secondary order-information-table">
+                        <tbody>
+                            <tr>
+                                <th><?= $escaper->escapeHtml(__('Order Date')) ?></th>
+                                <td><?= $escaper->escapeHtml($summary['created_at']) ?></td>
+                            </tr>
+                            <tr>
+                                <th><?= $escaper->escapeHtml(__('Order Status')) ?></th>
+                                <td><?= $escaper->escapeHtml($summary['status']) ?></td>
+                            </tr>
+                            <tr>
+                                <th><?= $escaper->escapeHtml(__('Seller Order')) ?></th>
+                                <td><?= $escaper->escapeHtml($summary['seller_order_id']) ?></td>
+                            </tr>
+                            <tr>
+                                <th><?= $escaper->escapeHtml(__('Delivered')) ?></th>
+                                <td><?= $escaper->escapeHtml($summary['delivered_at'] ?: __('Not recorded')) ?></td>
+                            </tr>
+                            <tr>
+                                <th><?= $escaper->escapeHtml(__('Refund Allowed Until')) ?></th>
+                                <td>
+                                    <?= $escaper->escapeHtml($summary['deadline'] ?: __('Not available')) ?>
+                                    <?php if ($summary['days_left'] !== null): ?>
+                                        <span class="acme-refund-days-left">
+                                            <?= $escaper->escapeHtml(__('(%1 days left)', $summary['days_left'])) ?>
+                                        </span>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="admin__page-section-item order-account-information">
+                <div class="admin__page-section-item-title">
+                    <span class="title"><?= $escaper->escapeHtml(__('Account Information')) ?></span>
+                </div>
+                <div class="admin__page-section-item-content">
+                    <table class="admin__table-secondary order-account-information-table">
+                        <tbody>
+                            <tr>
+                                <th><?= $escaper->escapeHtml(__('Customer Name')) ?></th>
+                                <td><?= $escaper->escapeHtml($summary['customer_name']) ?></td>
+                            </tr>
+                            <tr>
+                                <th><?= $escaper->escapeHtml(__('Email')) ?></th>
+                                <td><?= $escaper->escapeHtml($summary['customer_email']) ?></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </section>
 
-    <table class="data-grid acme-refund-lines">
-        <thead>
-            <tr>
-                <th><?= $block->escapeHtml(__('SKU')) ?></th>
-                <th><?= $block->escapeHtml(__('Product')) ?></th>
-                <th><?= $block->escapeHtml(__('Ordered')) ?></th>
-                <th><?= $block->escapeHtml(__('Previously Refunded')) ?></th>
-                <th><?= $block->escapeHtml(__('Remaining')) ?></th>
-                <th><?= $block->escapeHtml(__('Unit Price')) ?></th>
-                <th><?= $block->escapeHtml(__('Tax Rate')) ?></th>
-                <th><?= $block->escapeHtml(__('Refund Qty')) ?></th>
-                <th><?= $block->escapeHtml(__('Line Amount')) ?></th>
-            </tr>
-        </thead>
-        <tbody>
-        <?php foreach ($lines as $line): ?>
-            <tr data-role="line-row" data-order-item-id="<?= $block->escapeHtmlAttr($line['order_item_id']) ?>">
-                <td><?= $block->escapeHtml($line['sku']) ?></td>
-                <td><?= $block->escapeHtml($line['product_name']) ?></td>
-                <td><?= $block->escapeHtml($line['qty_ordered']) ?></td>
-                <td><?= $block->escapeHtml($line['qty_refunded_before']) ?></td>
-                <td data-role="remaining"><?= $block->escapeHtml($line['qty_remaining']) ?></td>
-                <td><?= $block->escapeHtml($block->formatMoney($line['unit_price'], $currency)) ?></td>
-                <td><?= $block->escapeHtml($line['tax_rate']) ?></td>
-                <td>
-                    <input type="number" min="0" step="1"
-                           data-role="qty-input"
-                           data-order-item-id="<?= $block->escapeHtmlAttr($line['order_item_id']) ?>"
-                           name="items[<?= $block->escapeHtmlAttr($line['order_item_id']) ?>]"
-                           value="0"/>
-                </td>
-                <td data-role="line-amount">&mdash;</td>
-            </tr>
-        <?php endforeach; ?>
-        </tbody>
-        <tfoot>
-            <tr>
-                <th colspan="8"><?= $block->escapeHtml(__('Grand Total')) ?></th>
-                <td data-role="grand-total">&mdash;</td>
-            </tr>
-        </tfoot>
-    </table>
+    <section class="admin__page-section">
+        <div class="admin__page-section-title">
+            <span class="title"><?= $escaper->escapeHtml(__('Items to Refund')) ?></span>
+        </div>
+        <?php if ($hasRefundable): ?>
+            <div class="acme-refund-items-toolbar">
+                <button type="button" class="action-secondary" data-role="refund-all">
+                    <span><?= $escaper->escapeHtml(__('Refund All Remaining')) ?></span>
+                </button>
+                <button type="button" class="action-tertiary" data-role="clear">
+                    <span><?= $escaper->escapeHtml(__('Clear')) ?></span>
+                </button>
+            </div>
+        <?php endif; ?>
+        <div class="admin__table-wrapper">
+            <table class="data-table admin__table-primary edit-order-table acme-refund-lines">
+                <thead>
+                    <tr class="headings">
+                        <th class="col-product"><span><?= $escaper->escapeHtml(__('Product')) ?></span></th>
+                        <th class="col-price"><span><?= $escaper->escapeHtml(__('Price')) ?></span></th>
+                        <th class="col-tax-percent"><span><?= $escaper->escapeHtml(__('Tax Rate')) ?></span></th>
+                        <th class="col-ordered-qty"><span><?= $escaper->escapeHtml(__('Ordered')) ?></span></th>
+                        <th class="col-refunded"><span><?= $escaper->escapeHtml(__('Refunded Before')) ?></span></th>
+                        <th class="col-remaining"><span><?= $escaper->escapeHtml(__('Remaining')) ?></span></th>
+                        <th class="col-refund"><span><?= $escaper->escapeHtml(__('Refund Qty')) ?></span></th>
+                        <th class="col-total last"><span><?= $escaper->escapeHtml(__('Row Total')) ?></span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($lines as $line): ?>
+                    <?php
+                    $itemId = (string) $line['order_item_id'];
+                    $remaining = $block->formatQty((string) $line['qty_remaining']);
+                    $locked = bccomp((string) $line['qty_remaining'], '0', 4) <= 0;
+                    $qtyLabel = __('Refund Qty for %1', $line['sku']);
+                    ?>
+                    <tr data-role="line-row"
+                        data-order-item-id="<?= $escaper->escapeHtmlAttr($itemId) ?>"
+                        data-sku="<?= $escaper->escapeHtmlAttr($line['sku']) ?>"
+                        data-remaining="<?= $escaper->escapeHtmlAttr($remaining) ?>"
+                        class="<?= $locked ? 'acme-refund-line-locked' : '' ?>">
+                        <td class="col-product">
+                            <div class="product-title"><?= $escaper->escapeHtml($line['product_name']) ?></div>
+                            <div class="product-sku-block">
+                                <span><?= $escaper->escapeHtml(__('SKU')) ?>:</span>
+                                <?= $escaper->escapeHtml($line['sku']) ?>
+                            </div>
+                        </td>
+                        <td class="col-price">
+                            <?= $escaper->escapeHtml($block->formatPrice((string) $line['unit_price'])) ?>
+                        </td>
+                        <td class="col-tax-percent">
+                            <?= $escaper->escapeHtml($block->formatRate((string) $line['tax_rate'])) ?>
+                        </td>
+                        <td class="col-ordered-qty">
+                            <?= $escaper->escapeHtml($block->formatQty((string) $line['qty_ordered'])) ?>
+                        </td>
+                        <td class="col-refunded">
+                            <?= $escaper->escapeHtml($block->formatQty((string) $line['qty_refunded_before'])) ?>
+                        </td>
+                        <td class="col-remaining" data-role="remaining"><?= $escaper->escapeHtml($remaining) ?></td>
+                        <td class="col-refund">
+                            <?php if ($locked): ?>
+                                <span class="acme-refund-fully-refunded">
+                                    <?= $escaper->escapeHtml(__('Fully refunded')) ?>
+                                </span>
+                            <?php else: ?>
+                                <input type="number" min="0" max="<?= $escaper->escapeHtmlAttr($remaining) ?>" step="1"
+                                       class="admin__control-text qty-input"
+                                       data-role="qty-input"
+                                       data-order-item-id="<?= $escaper->escapeHtmlAttr($itemId) ?>"
+                                       name="items[<?= $escaper->escapeHtmlAttr($itemId) ?>]"
+                                       aria-label="<?= $escaper->escapeHtmlAttr($qtyLabel) ?>"
+                                       value="0"/>
+                                <div class="admin__field-error" data-role="qty-error" hidden="hidden"></div>
+                            <?php endif; ?>
+                        </td>
+                        <td class="col-total last" data-role="line-amount">&mdash;</td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </section>
 
-    <div class="acme-refund-actions">
-        <button type="button" class="action-primary" data-role="submit">
-            <span><?= $block->escapeHtml(__('Submit Refund')) ?></span>
-        </button>
-        <p data-role="state" class="acme-refund-state"></p>
-        <p><a data-role="view-link" href="#" hidden="hidden"><?= $escaper->escapeHtml(__('View refund')) ?></a></p>
-        <p><a data-role="receipt-link" href="#" hidden="hidden"><?= $escaper->escapeHtml(__('Download receipt')) ?></a></p>
-    </div>
+    <section class="admin__page-section">
+        <div class="admin__page-section-title">
+            <span class="title"><?= $escaper->escapeHtml(__('Refund Total')) ?></span>
+        </div>
+        <div class="admin__page-section-content acme-refund-summary">
+            <div class="admin__page-section-item">
+                <div class="admin__field _required">
+                    <label class="admin__field-label" for="acme-refund-reason">
+                        <span><?= $escaper->escapeHtml(__('Reason')) ?></span>
+                    </label>
+                    <div class="admin__field-control">
+                        <select id="acme-refund-reason" class="admin__control-select" data-role="reason"
+                                name="reason_code" required="required">
+                            <?php foreach ($block->getReasonOptions() as $option): ?>
+                                <option value="<?= $escaper->escapeHtmlAttr($option['value']) ?>">
+                                    <?= $escaper->escapeHtml($option['label']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                </div>
+                <div class="admin__page-section-item-title">
+                    <span class="title"><?= $escaper->escapeHtml(__('Pre-refund Total (seller items)')) ?></span>
+                </div>
+                <table class="admin__table-secondary">
+                    <tbody>
+                        <tr>
+                            <th><?= $escaper->escapeHtml(__('Product Subtotal')) ?></th>
+                            <td><?= $escaper->escapeHtml($block->formatPrice($figures->preRefundSubtotal)) ?></td>
+                        </tr>
+                        <tr>
+                            <th><?= $escaper->escapeHtml(__('Shipping')) ?></th>
+                            <td><?= $escaper->escapeHtml($block->formatPrice($figures->preRefundShipping)) ?></td>
+                        </tr>
+                        <tr>
+                            <th><?= $escaper->escapeHtml(__('Consumption Tax')) ?></th>
+                            <td><?= $escaper->escapeHtml($block->formatPrice($figures->preRefundTax)) ?></td>
+                        </tr>
+                        <tr>
+                            <th><?= $escaper->escapeHtml(__('Total')) ?></th>
+                            <td><?= $escaper->escapeHtml($block->formatPrice($figures->preRefundGrandTotal)) ?></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="admin__page-section-item order-totals">
+                <div class="admin__page-section-item-title">
+                    <span class="title"><?= $escaper->escapeHtml(__('Refund Totals')) ?></span>
+                </div>
+                <table class="data-table admin__table-secondary order-subtotal-table">
+                    <tbody>
+                        <tr>
+                            <td class="label"><?= $escaper->escapeHtml(__('Refund Subtotal')) ?></td>
+                            <td data-role="refund-subtotal"><?= $escaper->escapeHtml($block->formatPrice('0')) ?></td>
+                        </tr>
+                        <tr>
+                            <td class="label"><?= $escaper->escapeHtml(__('Shipping')) ?></td>
+                            <td data-role="refund-shipping"><?= $escaper->escapeHtml($block->formatPrice('0')) ?></td>
+                        </tr>
+                        <tr>
+                            <td class="label"><?= $escaper->escapeHtml(__('Consumption Tax')) ?></td>
+                            <td data-role="refund-tax"><?= $escaper->escapeHtml($block->formatPrice('0')) ?></td>
+                        </tr>
+                    </tbody>
+                    <tfoot>
+                        <tr class="col-0">
+                            <td class="label"><strong><?= $escaper->escapeHtml(__('Refund Total')) ?></strong></td>
+                            <td>
+                                <strong data-role="grand-total">
+                                    <?= $escaper->escapeHtml($block->formatPrice('0')) ?>
+                                </strong>
+                            </td>
+                        </tr>
+                    </tfoot>
+                </table>
+                <div class="actions acme-refund-actions">
+                    <button type="button" class="action-primary" data-role="submit"
+                        <?= $hasRefundable ? '' : 'disabled="disabled"' ?>>
+                        <span><?= $escaper->escapeHtml(__('Submit Refund')) ?></span>
+                    </button>
+                </div>
+                <div class="messages acme-refund-state">
+                    <div data-role="state" class="message" hidden="hidden"></div>
+                </div>
+                <p>
+                    <a data-role="view-link" href="#" hidden="hidden"><?= $escaper->escapeHtml(__('View refund')) ?></a>
+                </p>
+                <p>
+                    <a data-role="receipt-link" href="#" hidden="hidden">
+                        <?= $escaper->escapeHtml(__('Download receipt')) ?>
+                    </a>
+                </p>
+            </div>
+        </div>
+    </section>
 </div>
 
 <script type="text/x-magento-init">
 {
     "#acme-refund-form": {
-        "acmeRefundForm": <?= /* @noEscape */ json_encode($config, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>
+        "acmeRefundForm": <?= /* @noEscape */ $configJson ?>
     }
 }
 </script>
