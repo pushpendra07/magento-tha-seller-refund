@@ -1,47 +1,136 @@
 <?php
+/**
+ * Seller refunds of one order, laid out like Magento's own Refunds tab (FRD 10.4): for each
+ * refund the partial-refund label, the pre-refund total, the refunded lines and a separate
+ * refund breakdown.
+ */
 /** @var \Acme\SellerRefund\Block\Order\RefundDetails $block */
+/** @var \Magento\Framework\Escaper $escaper */
 $refundViews = $block->getRefundViews();
 ?>
 <?php if ($refundViews): ?>
-    <div class="acme-order-refunds">
+    <div class="order-details-items creditmemo acme-seller-refunds">
         <?php foreach ($refundViews as $view): ?>
             <?php
             $refund = $view['refund'];
             $figures = $view['figures'];
-            $currency = $figures->currency;
+            $refundNo = (string) $refund->getRefundNo();
+            $exTax = bcadd($figures->refundSubtotal, $figures->refundShipping, 4);
             ?>
-            <div class="acme-order-refund" data-refund-no="<?= $block->escapeHtmlAttr($refund->getRefundNo()) ?>">
-                <h3 class="acme-order-refund__heading">
-                    <?php if ($figures->isPartial()): ?>
-                        <?= $block->escapeHtml(__('Partial Refund')) ?>
-                    <?php else: ?>
-                        <?= $block->escapeHtml(__('Refund')) ?>
-                    <?php endif; ?>
-                    <span class="acme-order-refund__no"><?= $block->escapeHtml($refund->getRefundNo()) ?></span>
-                </h3>
+            <div class="order-title" data-refund-no="<?= $escaper->escapeHtmlAttr($refundNo) ?>">
+                <strong>
+                    <?= $escaper->escapeHtml($figures->isPartial()
+                        ? __('Partial Refund #%1', $refundNo)
+                        : __('Refund #%1', $refundNo)) ?>
+                </strong>
+                <span class="acme-seller-refund-date">
+                    <?= $escaper->escapeHtml(
+                        __('Refund Date: %1', $block->renderRefundDate($refund->getCreatedAt()))
+                    ) ?>
+                </span>
+            </div>
 
-                <table class="data table acme-order-refund__preref">
-                    <caption class="table-caption"><?= $block->escapeHtml(__('Pre-refund Total')) ?></caption>
+            <div class="table-wrapper acme-seller-refund-pre">
+                <table class="data table">
+                    <caption class="table-caption"><?= $escaper->escapeHtml(__('Pre-refund Total')) ?></caption>
+                    <thead>
+                        <tr>
+                            <th scope="col" class="col" colspan="2">
+                                <?= $escaper->escapeHtml(__('Pre-refund Total (seller items)')) ?>
+                            </th>
+                        </tr>
+                    </thead>
                     <tbody>
-                        <tr><th><?= $block->escapeHtml(__('Product Subtotal')) ?></th><td><?= $block->escapeHtml($block->formatMoney($figures->preRefundSubtotal, $currency)) ?></td></tr>
-                        <tr><th><?= $block->escapeHtml(__('Shipping')) ?></th><td><?= $block->escapeHtml($block->formatMoney($figures->preRefundShipping, $currency)) ?></td></tr>
-                        <tr><th><?= $block->escapeHtml(__('Consumption Tax')) ?></th><td><?= $block->escapeHtml($block->formatMoney($figures->preRefundTax, $currency)) ?></td></tr>
-                        <tr><th><?= $block->escapeHtml(__('Total')) ?></th><td><?= $block->escapeHtml($block->formatMoney($figures->preRefundGrandTotal, $currency)) ?></td></tr>
-                    </tbody>
-                </table>
-
-                <table class="data table acme-order-refund__refund">
-                    <caption class="table-caption"><?= $block->escapeHtml(__('Refund')) ?></caption>
-                    <tbody>
-                        <tr><th><?= $block->escapeHtml(__('Refund Date')) ?></th><td><?= $block->escapeHtml($block->renderRefundDate($refund->getCreatedAt())) ?></td></tr>
-                        <tr><th><?= $block->escapeHtml(__('Product Subtotal')) ?></th><td><?= $block->escapeHtml($block->formatMoney($figures->refundSubtotal, $currency)) ?></td></tr>
-                        <tr><th><?= $block->escapeHtml(__('Shipping')) ?></th><td><?= $block->escapeHtml($block->formatMoney($figures->refundShipping, $currency)) ?></td></tr>
-                        <tr><th><?= $block->escapeHtml(__('Ex-tax Amount')) ?></th><td><?= $block->escapeHtml($block->formatMoney(bcadd($figures->refundSubtotal, $figures->refundShipping, 4), $currency)) ?></td></tr>
-                        <tr><th><?= $block->escapeHtml(__('Consumption Tax')) ?></th><td><?= $block->escapeHtml($block->formatMoney($figures->refundTax, $currency)) ?></td></tr>
-                        <tr><th><?= $block->escapeHtml(__('Total')) ?></th><td><?= $block->escapeHtml($block->formatMoney($figures->refundGrandTotal, $currency)) ?></td></tr>
+                        <?php foreach ([
+                            [__('Product Subtotal'), $figures->preRefundSubtotal],
+                            [__('Shipping'), $figures->preRefundShipping],
+                            [__('Consumption Tax'), $figures->preRefundTax],
+                            [__('Total'), $figures->preRefundGrandTotal],
+                        ] as [$label, $amount]): ?>
+                            <tr>
+                                <th scope="row" class="mark"><?= $escaper->escapeHtml($label) ?></th>
+                                <td class="amount"><?= $escaper->escapeHtml($block->formatOrderPrice($amount)) ?></td>
+                            </tr>
+                        <?php endforeach; ?>
                     </tbody>
                 </table>
             </div>
+
+            <div class="table-wrapper table-order-items creditmemo">
+                <table class="data table table-order-items creditmemo"
+                       id="my-seller-refund-table-<?= (int) $refund->getEntityId() ?>">
+                    <caption class="table-caption"><?= $escaper->escapeHtml(__('Items Refunded')) ?></caption>
+                    <thead>
+                        <tr>
+                            <th scope="col" class="col name"><?= $escaper->escapeHtml(__('Product Name')) ?></th>
+                            <th scope="col" class="col sku"><?= $escaper->escapeHtml(__('SKU')) ?></th>
+                            <th scope="col" class="col price"><?= $escaper->escapeHtml(__('Price')) ?></th>
+                            <th scope="col" class="col qty"><?= $escaper->escapeHtml(__('Qty')) ?></th>
+                            <th scope="col" class="col subtotal"><?= $escaper->escapeHtml(__('Subtotal')) ?></th>
+                            <th scope="col" class="col tax"><?= $escaper->escapeHtml(__('Tax')) ?></th>
+                            <th scope="col" class="col total"><?= $escaper->escapeHtml(__('Row Total')) ?></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($figures->lines as $line): ?>
+                            <tr>
+                                <td class="col name" data-th="<?= $escaper->escapeHtmlAttr(__('Product Name')) ?>">
+                                    <strong class="product name product-item-name">
+                                        <?= $escaper->escapeHtml($line->productName) ?>
+                                    </strong>
+                                </td>
+                                <td class="col sku" data-th="<?= $escaper->escapeHtmlAttr(__('SKU')) ?>">
+                                    <?= $escaper->escapeHtml($line->sku) ?>
+                                </td>
+                                <td class="col price" data-th="<?= $escaper->escapeHtmlAttr(__('Price')) ?>">
+                                    <?= $escaper->escapeHtml($block->formatOrderPrice($line->unitPrice)) ?>
+                                </td>
+                                <td class="col qty" data-th="<?= $escaper->escapeHtmlAttr(__('Qty')) ?>">
+                                    <?= $escaper->escapeHtml($block->formatQty($line->qtyRefund)) ?>
+                                </td>
+                                <td class="col subtotal" data-th="<?= $escaper->escapeHtmlAttr(__('Subtotal')) ?>">
+                                    <?= $escaper->escapeHtml($block->formatOrderPrice($line->rowAmount)) ?>
+                                </td>
+                                <td class="col tax" data-th="<?= $escaper->escapeHtmlAttr(__('Tax')) ?>">
+                                    <?= $escaper->escapeHtml($block->formatOrderPrice($line->taxAmount)) ?>
+                                </td>
+                                <td class="col total" data-th="<?= $escaper->escapeHtmlAttr(__('Row Total')) ?>">
+                                    <?= $escaper->escapeHtml($block->formatOrderPrice($line->grandTotal)) ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                    <tfoot>
+                        <?php foreach ([
+                            ['subtotal', __('Refund Subtotal'), $figures->refundSubtotal],
+                            ['shipping', __('Shipping'), $figures->refundShipping],
+                            ['ex-tax', __('Ex-tax Amount'), $exTax],
+                            ['tax', __('Consumption Tax'), $figures->refundTax],
+                        ] as [$class, $label, $amount]): ?>
+                            <tr class="<?= $escaper->escapeHtmlAttr($class) ?>">
+                                <th colspan="6" class="mark" scope="row"><?= $escaper->escapeHtml($label) ?></th>
+                                <td class="amount" data-th="<?= $escaper->escapeHtmlAttr($label) ?>">
+                                    <?= $escaper->escapeHtml($block->formatOrderPrice($amount)) ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                        <tr class="grand_total">
+                            <th colspan="6" class="mark" scope="row">
+                                <strong><?= $escaper->escapeHtml(__('Refund Total')) ?></strong>
+                            </th>
+                            <td class="amount" data-th="<?= $escaper->escapeHtmlAttr(__('Refund Total')) ?>">
+                                <strong>
+                                    <?= $escaper->escapeHtml($block->formatOrderPrice($figures->refundGrandTotal)) ?>
+                                </strong>
+                            </td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
         <?php endforeach; ?>
+    </div>
+<?php else: ?>
+    <div class="message info empty">
+        <span><?= $escaper->escapeHtml(__('This order has no seller refunds.')) ?></span>
     </div>
 <?php endif; ?>

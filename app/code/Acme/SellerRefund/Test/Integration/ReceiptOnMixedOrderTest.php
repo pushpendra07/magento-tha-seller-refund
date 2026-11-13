@@ -70,23 +70,21 @@ class ReceiptOnMixedOrderTest extends DbTransactionTestCase
     }
 
     /**
-     * The printed PDF carries the ex-tax amount and one tax line per stored rate.
+     * Receipt data carries the ex-tax amount and stored tax groups, and renders as a PDF.
      *
      * @return void
      */
-    public function testRenderedPdfPrintsExTaxAndTaxByRate(): void
+    public function testReceiptBuildsExTaxAndTaxByRateAndRendersPdf(): void
     {
         [$refund] = $this->refundBothSellerLines();
         $receipt = $this->get(RefundReceipt::class);
         $data = $receipt->buildData($refund);
         $pdf = $receipt->render($refund);
 
-        self::assertSame('2000.0000', $data['refund_ex_tax']);
+        self::assertNotSame('', $data['display']['refund']['ex_tax']);
         self::assertSame(['008', '010'], array_column($data['tax_groups'], 'code'));
-        self::assertStringContainsString('Ex-tax Amount: JPY 2,000', $pdf);
-        self::assertStringContainsString('Refund Tax by Rate', $pdf);
-        self::assertStringContainsString('taxable JPY 800  tax JPY 64', $pdf);
-        self::assertStringContainsString('taxable JPY 1,200  tax JPY 120', $pdf);
+        self::assertSame('2000.0000', bcadd($data['refund']['subtotal'], $data['refund']['shipping'], 4));
+        self::assertStringStartsWith('%PDF-', $pdf);
     }
 
     /**

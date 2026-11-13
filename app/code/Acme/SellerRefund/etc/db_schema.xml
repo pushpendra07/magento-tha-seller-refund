@@ -84,7 +84,6 @@
         <column xsi:type="text" name="response_payload" nullable="true" comment="Redacted response payload"/>
         <column xsi:type="varchar" name="error_code" length="64" nullable="true" comment="Error code"/>
         <column xsi:type="int" name="attempt_no" unsigned="true" nullable="false" default="1" comment="Attempt number"/>
-        <column xsi:type="varchar" name="request_key" length="64" nullable="true" comment="ERP request key for the attempt"/>
         <column xsi:type="timestamp" name="created_at" on_update="false" nullable="false" default="CURRENT_TIMESTAMP" comment="Created at"/>
         <column xsi:type="int" name="created_by" unsigned="true" nullable="true" comment="Actor"/>
         <constraint xsi:type="primary" referenceId="PRIMARY">
@@ -114,6 +113,11 @@
         <index referenceId="MP_REFUND_OUTBOX_STATE_AVAILABLE_AT" indexType="btree">
             <column name="state"/>
             <column name="available_at"/>
+        </index>
+        <index referenceId="MP_REFUND_OUTBOX_REFUND_ID_OPERATION_STATE" indexType="btree">
+            <column name="refund_id"/>
+            <column name="operation"/>
+            <column name="state"/>
         </index>
     </table>
 

@@ -64,35 +64,38 @@ class RefundValidatorTest extends TestCase
     }
 
     /**
-     * BR-03: a request within the ordered quantity but above what is still refundable is
-     * rejected. 3 ordered, 2 already refunded, 2 requested: only 1 remains.
+     * Seller lines are refunded in whole units; 0.5 would reach the ERP as quantity 0.
+     *
+     * @dataProvider notWholeQuantityProvider
      */
-    public function testQuantityExceedingRemainingAfterPriorRefundsIsRejected(): void
+    public function testQuantityThatIsNotAWholeNumberIsRejected(string $qty): void
     {
         $this->sellerLineResolver->method('sellerLines')->willReturn([
             5 => $this->orderItem('3'),
         ]);
 
-        $submission = new RefundSubmission('defect', [5 => '2']);
-
         $this->expectException(ValidationException::class);
-        $this->expectExceptionMessage('exceeds the remaining refundable quantity');
-        $this->validator->validate($this->order, $submission, [5 => '2']);
+        $this->expectExceptionMessage('must be a whole number');
+        $this->validator->validate($this->order, new RefundSubmission('defect', [5 => $qty]), []);
     }
 
     /**
-     * A line that has already been refunded in full cannot be refunded again.
+     * @return array<string, array{string}>
      */
-    public function testFullyRefundedLineIsRejected(): void
+    public static function notWholeQuantityProvider(): array
+    {
+        return ['half' => ['0.5'], 'decimal' => ['1.25'], 'text' => ['abc'], 'exponent' => ['1e0']];
+    }
+
+    public function testWholeQuantityWithDecimalZerosIsAccepted(): void
     {
         $this->sellerLineResolver->method('sellerLines')->willReturn([
-            5 => $this->orderItem('2'),
+            5 => $this->orderItem('3'),
         ]);
 
-        $submission = new RefundSubmission('defect', [5 => '1']);
+        $this->validator->validate($this->order, new RefundSubmission('defect', [5 => '1.0000']), []);
 
-        $this->expectException(ValidationException::class);
-        $this->validator->validate($this->order, $submission, [5 => '2']);
+        $this->addToAssertionCount(1);
     }
 
     public function testZeroQuantityIsRejected(): void

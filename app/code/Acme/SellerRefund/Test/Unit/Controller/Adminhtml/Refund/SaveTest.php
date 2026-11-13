@@ -52,7 +52,7 @@ class SaveTest extends TestCase
 
         // The dispatcher absorbs the transient ERP error and reschedules the outbox job.
         $dispatcher = $this->createMock(Dispatcher::class);
-        $dispatcher->expects(self::once())->method('run')->with(Outbox::OP_CREATE, 1)->willReturn(1);
+        $dispatcher->expects(self::once())->method('run')->with(Outbox::OP_CREATE, 1, 7)->willReturn(1);
 
         $fresh = $this->createMock(RefundInterface::class);
         $fresh->method('getEntityId')->willReturn(7);

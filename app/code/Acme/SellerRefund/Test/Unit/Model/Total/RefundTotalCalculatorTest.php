@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Acme\SellerRefund\Test\Unit\Model\Total;
 
 use Acme\SellerRefund\Model\SellerLineResolver;
+use Acme\SellerRefund\Model\Tax\LineTaxRate;
 use Acme\SellerRefund\Model\Tax\TaxCodeResolver;
 use Acme\SellerRefund\Model\Total\RefundTotalCalculator;
 use DateTimeImmutable;
@@ -98,7 +99,7 @@ class RefundTotalCalculatorTest extends TestCase
     {
         $lines = [1 => $this->item(1200.0, 2.0, 101, 'SELLER-RED-01', 'Seller Red Widget')];
         $figures = $this->calculator($lines)->fromSelection(
-            $this->order('500.0000'),
+            $this->order('500.0000', '2400.0000'),
             [1 => '2'],
             [],
             new DateTimeImmutable()
@@ -118,7 +119,7 @@ class RefundTotalCalculatorTest extends TestCase
     {
         $lines = [1 => $this->item(1200.0, 5.0, 101, 'SELLER-RED-01', 'Seller Red Widget')];
         $figures = $this->calculator($lines)->fromSelection(
-            $this->order('500.0000'),
+            $this->order('500.0000', '2400.0000'),
             [1 => '2'],
             [],
             new DateTimeImmutable()
@@ -159,13 +160,85 @@ class RefundTotalCalculatorTest extends TestCase
     }
 
     /**
+     * FRD section 11: a mixed order's shipping also covers the first-party line, so a full
+     * seller refund gets only the seller share. Seller rows 1200 + 1600 = 2800 of an order
+     * subtotal of 4800 (core item 2000); shipping 480, so the seller share is 280, not 480.
+     */
+    public function testMixedOrderFullRefundGetsOnlyTheSellerShippingShare(): void
+    {
+        $lines = [
+            1 => $this->item(1200.0, 1.0, 101, 'SELLER-RED-01', 'Seller Red Widget'),
+            2 => $this->item(800.0, 2.0, 102, 'SELLER-BLU-02', 'Seller Blue Gadget'),
+        ];
+
+        $figures = $this->calculator($lines)->fromSelection(
+            $this->order('480.0000', '4800.0000'),
+            [1 => '1', 2 => '2'],
+            [],
+            new DateTimeImmutable()
+        );
+
+        self::assertFalse($figures->isPartial());
+        self::assertSame('280.0000', $figures->refundShipping);
+        self::assertSame('280.0000', $figures->preRefundShipping);
+    }
+
+    /**
+     * FRD section 11: the refund uses the rate the original order actually charged. Here the
+     * product's tax class is 10%, but the order line was charged 0% (the store had no tax rule),
+     * so refunding 10% would pay the customer tax they never paid.
+     */
+    public function testRefundUsesTheTaxRateTheOrderActuallyCharged(): void
+    {
+        $lines = [1 => $this->item(1200.0, 1.0, 101, 'SELLER-RED-01', 'Seller Red Widget', 0.0)];
+
+        $figures = $this->calculator($lines)->fromSelection(
+            $this->order('0.0000', '1200.0000'),
+            [1 => '1'],
+            [],
+            new DateTimeImmutable()
+        );
+
+        self::assertSame('0.0000', $figures->refundTax);
+        self::assertSame('1200.0000', $figures->refundGrandTotal);
+        self::assertSame('010', $figures->lines[0]->taxCode, 'The ERP still receives the business tax code.');
+    }
+
+    /**
+     * Decimal columns arrive as strings. A float has about 15 significant digits, so converting
+     * 1234567890123.4567 through one gave 1234567890123.4568 (FRD 11: decimal money).
+     */
+    public function testDecimalStringsKeepEveryDigit(): void
+    {
+        $item = $this->createMock(OrderItem::class);
+        $item->method('getPrice')->willReturn('1234567890123.4567');
+        $item->method('getQtyOrdered')->willReturn('2.0000');
+        $item->method('getData')->willReturn(101);
+        $item->method('getSku')->willReturn('SELLER-RED-01');
+        $item->method('getName')->willReturn('Seller Red Widget');
+
+        $figures = $this->calculator([1 => $item])->fromSelection(
+            $this->order('0.0000'),
+            [1 => '1'],
+            [],
+            new DateTimeImmutable()
+        );
+
+        self::assertSame('1234567890123.4567', $figures->lines[0]->rowAmount);
+    }
+
+    /**
      * @param array<int, OrderItem&MockObject> $sellerLines
      */
     private function calculator(array $sellerLines): RefundTotalCalculator
     {
         $this->sellerLineResolver->method('sellerLines')->willReturn($sellerLines);
 
-        return new RefundTotalCalculator($this->sellerLineResolver, $this->taxCodeResolver);
+        return new RefundTotalCalculator(
+            $this->sellerLineResolver,
+            $this->taxCodeResolver,
+            new LineTaxRate($this->taxCodeResolver)
+        );
     }
 
     private function item(
@@ -173,9 +246,11 @@ class RefundTotalCalculatorTest extends TestCase
         float $qtyOrdered,
         int $taxClassOptionId,
         string $sku,
-        string $name
+        string $name,
+        ?float $chargedTaxPercent = null
     ): OrderItem&MockObject {
         $item = $this->createMock(OrderItem::class);
+        $item->method('getTaxPercent')->willReturn($chargedTaxPercent);
         $item->method('getPrice')->willReturn($price);
         $item->method('getQtyOrdered')->willReturn($qtyOrdered);
         $item->method('getData')->willReturn($taxClassOptionId);
@@ -185,10 +260,11 @@ class RefundTotalCalculatorTest extends TestCase
         return $item;
     }
 
-    private function order(string $shippingAmount): OrderInterface&MockObject
+    private function order(string $shippingAmount, string $subtotal = '0.0000'): OrderInterface&MockObject
     {
         $order = $this->createMock(OrderInterface::class);
         $order->method('getShippingAmount')->willReturn((float) $shippingAmount);
+        $order->method('getSubtotal')->willReturn((float) $subtotal);
         $order->method('getOrderCurrencyCode')->willReturn('JPY');
 
         return $order;

@@ -1,0 +1,69 @@
+<?php
+/**
+ * "Refunded Orders" table under My Orders, styled like Magento's order table, with its own pager.
+ */
+/** @var \Acme\SellerRefund\Block\Order\RefundHistory $block */
+/** @var \Magento\Framework\Escaper $escaper */
+$refunds = $block->getRefunds();
+$typeFull = \Acme\SellerRefund\Api\Data\RefundInterface::TYPE_FULL;
+?>
+<?php if ($refunds !== null && $refunds->getSize()): ?>
+    <div class="block acme-seller-refund-history">
+        <div class="block-title"><strong><?= $escaper->escapeHtml(__('Refunded Orders')) ?></strong></div>
+        <div class="table-wrapper orders-history">
+            <table class="data table table-order-items history" id="my-seller-refunds-table">
+                <caption class="table-caption"><?= $escaper->escapeHtml(__('Refunded Orders')) ?></caption>
+                <thead>
+                    <tr>
+                        <th scope="col" class="col refund-no"><?= $escaper->escapeHtml(__('Refund #')) ?></th>
+                        <th scope="col" class="col id"><?= $escaper->escapeHtml(__('Order #')) ?></th>
+                        <th scope="col" class="col date"><?= $escaper->escapeHtml(__('Refund Date')) ?></th>
+                        <th scope="col" class="col type"><?= $escaper->escapeHtml(__('Type')) ?></th>
+                        <th scope="col" class="col refunded-items">
+                            <?= $escaper->escapeHtml(__('Refunded Items')) ?>
+                        </th>
+                        <th scope="col" class="col total"><?= $escaper->escapeHtml(__('Refund Total')) ?></th>
+                        <th scope="col" class="col actions"><?= $escaper->escapeHtml(__('Action')) ?></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($refunds as $refund): ?>
+                        <tr>
+                            <td data-th="<?= $escaper->escapeHtmlAttr(__('Refund #')) ?>" class="col refund-no">
+                                <?= $escaper->escapeHtml($refund->getRefundNo()) ?>
+                            </td>
+                            <td data-th="<?= $escaper->escapeHtmlAttr(__('Order #')) ?>" class="col id">
+                                <?= $escaper->escapeHtml($refund->getData('order_increment_id')) ?>
+                            </td>
+                            <td data-th="<?= $escaper->escapeHtmlAttr(__('Refund Date')) ?>" class="col date">
+                                <?= $escaper->escapeHtml($block->formatRefundDate($refund)) ?>
+                            </td>
+                            <td data-th="<?= $escaper->escapeHtmlAttr(__('Type')) ?>" class="col type">
+                                <?= $escaper->escapeHtml(
+                                    $refund->getRefundType() === $typeFull
+                                        ? __('Full refund')
+                                        : __('Partial refund')
+                                ) ?>
+                            </td>
+                            <td data-th="<?= $escaper->escapeHtmlAttr(__('Refunded Items')) ?>"
+                                class="col refunded-items">
+                                <?= $escaper->escapeHtml(implode(', ', $block->getRefundedSkus($refund))) ?>
+                            </td>
+                            <td data-th="<?= $escaper->escapeHtmlAttr(__('Refund Total')) ?>" class="col total">
+                                <?= $escaper->escapeHtml($block->formatTotal($refund)) ?>
+                            </td>
+                            <td data-th="<?= $escaper->escapeHtmlAttr(__('Action')) ?>" class="col actions">
+                                <a href="<?= $escaper->escapeUrl($block->getViewUrl($refund)) ?>" class="action view">
+                                    <span><?= $escaper->escapeHtml(__('View Refund')) ?></span>
+                                </a>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+        <?php if ($block->getPagerHtml()): ?>
+            <div class="order-products-toolbar toolbar bottom"><?= $block->getPagerHtml() ?></div>
+        <?php endif; ?>
+    </div>
+<?php endif; ?>

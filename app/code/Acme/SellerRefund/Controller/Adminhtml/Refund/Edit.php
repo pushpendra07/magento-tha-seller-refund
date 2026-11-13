@@ -6,10 +6,11 @@ namespace Acme\SellerRefund\Controller\Adminhtml\Refund;
 
 use Magento\Backend\App\Action;
 use Magento\Backend\App\Action\Context;
+use Magento\Framework\App\Action\HttpGetActionInterface;
 use Magento\Framework\View\Result\Page;
 use Magento\Framework\View\Result\PageFactory;
 
-class Edit extends Action
+class Edit extends Action implements HttpGetActionInterface
 {
     public const ADMIN_RESOURCE = 'Acme_SellerRefund::create';
 

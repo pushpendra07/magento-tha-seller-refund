@@ -4,23 +4,20 @@ declare(strict_types=1);
 
 namespace Acme\SellerRefund\Test\Integration;
 
-use Acme\SellerRefund\Block\Adminhtml\Refund\Worklist;
-use Acme\SellerRefund\Model\ResourceModel\Refund\Collection;
+use Magento\Framework\View\Element\UiComponent\DataProvider\CollectionFactory;
+use Acme\SellerRefund\Model\ResourceModel\Refund\Grid\Collection;
 use Acme\SellerRefund\Test\Integration\Framework\AppTestCase;
 
 /**
- * The admin worklist block returns its collection with the order and line summary columns
- * joined in, and renders one row per refund without loading an order model per row.
+ * The active UI grid data source supplies order and line summaries without per-row loads.
  */
 class WorklistRendersTest extends AppTestCase
 {
     public function testWorklistReturnsCollectionWithJoinedSummaryColumns(): void
     {
-        /** @var Worklist $block */
-        $block = $this->create(Worklist::class);
-
         /** @var Collection $collection */
-        $collection = $block->getRefunds();
+        $collection = $this->create(CollectionFactory::class)
+            ->getReport('acme_refund_listing_data_source');
 
         // The seeded refunds (SR-ORD-1003, SR-ORD-1006) are present.
         self::assertGreaterThanOrEqual(1, $collection->getSize());

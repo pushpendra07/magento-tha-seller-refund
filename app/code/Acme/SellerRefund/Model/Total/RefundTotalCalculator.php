@@ -7,6 +7,7 @@ namespace Acme\SellerRefund\Model\Total;
 use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\Data\RefundItemInterface;
 use Acme\SellerRefund\Model\SellerLineResolver;
+use Acme\SellerRefund\Model\Tax\LineTaxRate;
 use Acme\SellerRefund\Model\Tax\TaxCodeResolver;
 use DateTimeInterface;
 use Magento\Sales\Api\Data\OrderInterface;
@@ -28,7 +29,8 @@ class RefundTotalCalculator
 
     public function __construct(
         private readonly SellerLineResolver $sellerLineResolver,
-        private readonly TaxCodeResolver $taxCodeResolver
+        private readonly TaxCodeResolver $taxCodeResolver,
+        private readonly LineTaxRate $lineTaxRate
     ) {
     }
 
@@ -61,7 +63,7 @@ class RefundTotalCalculator
             $rowAmounts[$orderItemId] = bcmul($unitPrice, $qty, self::SCALE);
         }
 
-        $refundShipping = $partial ? self::ZERO : $this->sellerShippingBase($order);
+        $refundShipping = $partial ? self::ZERO : $this->sellerShippingBase($order, $sellerLines);
         $shippingShares = $this->allocate($refundShipping, $rowAmounts);
 
         $lines = [];
@@ -71,7 +73,7 @@ class RefundTotalCalculator
             $rowAmount = $rowAmounts[$orderItemId];
             $shipping = $shippingShares[$orderItemId] ?? self::ZERO;
             $code = $this->taxCodeResolver->toBusinessCode((int) $item->getData('mp_tax_class'));
-            $rate = $this->taxCodeResolver->rateFor($code);
+            $rate = $this->lineTaxRate->forItem($item);
             $taxable = bcadd($rowAmount, $shipping, self::SCALE);
             $taxAmount = bcmul($taxable, $rate, self::SCALE);
             $grandTotal = bcadd($taxable, $taxAmount, self::SCALE);
@@ -172,7 +174,7 @@ class RefundTotalCalculator
             );
         }
 
-        $shipping = $this->sellerShippingBase($order);
+        $shipping = $this->sellerShippingBase($order, $sellerLines);
         $shippingShares = $this->allocate($shipping, $rowAmounts);
 
         $subtotal = self::ZERO;
@@ -181,7 +183,7 @@ class RefundTotalCalculator
             $rowAmount = $rowAmounts[$orderItemId];
             $share = $shippingShares[$orderItemId] ?? self::ZERO;
             $code = $this->taxCodeResolver->toBusinessCode((int) $item->getData('mp_tax_class'));
-            $rate = $this->taxCodeResolver->rateFor($code);
+            $rate = $this->lineTaxRate->forItem($item);
             $subtotal = bcadd($subtotal, $rowAmount, self::SCALE);
             $tax = bcadd($tax, bcmul(bcadd($rowAmount, $share, self::SCALE), $rate, self::SCALE), self::SCALE);
         }
@@ -215,9 +217,41 @@ class RefundTotalCalculator
         return true;
     }
 
-    private function sellerShippingBase(OrderInterface $order): string
+    /**
+     * Seller share of the order's shipping (FRD section 11).
+     *
+     * The order stores one shipping amount for all lines. On a mixed order that amount also
+     * covers first-party items, so the seller share is shipping x seller ex-tax rows / order
+     * subtotal. It never exceeds the order's shipping and is zero when it cannot be derived.
+     *
+     * @param OrderInterface $order
+     * @param array<int, \Magento\Sales\Api\Data\OrderItemInterface> $sellerLines
+     * @return string
+     */
+    private function sellerShippingBase(OrderInterface $order, array $sellerLines): string
     {
-        return $this->num($order->getShippingAmount());
+        $orderShipping = $this->num($order->getShippingAmount());
+        $orderSubtotal = $this->num($order->getSubtotal());
+        if (bccomp($orderShipping, self::ZERO, self::SCALE) <= 0
+            || bccomp($orderSubtotal, self::ZERO, self::SCALE) <= 0
+        ) {
+            return self::ZERO;
+        }
+
+        $sellerSubtotal = self::ZERO;
+        foreach ($sellerLines as $item) {
+            $sellerSubtotal = bcadd(
+                $sellerSubtotal,
+                bcmul($this->num($item->getPrice()), $this->num($item->getQtyOrdered()), self::SCALE),
+                self::SCALE
+            );
+        }
+
+        if (bccomp($sellerSubtotal, $orderSubtotal, self::SCALE) >= 0) {
+            return $orderShipping;
+        }
+
+        return bcdiv(bcmul($orderShipping, $sellerSubtotal, 8), $orderSubtotal, self::SCALE);
     }
 
     private function currency(OrderInterface $order): string
@@ -276,6 +310,17 @@ class RefundTotalCalculator
 
     private function num(mixed $value): string
     {
+        // Decimal columns arrive as strings: normalise them with bcmath so no digit is lost to a
+        // binary float (FRD 11: decimal money). Half-up rounding at 4 places, away from zero.
+        $text = is_int($value) ? (string) $value : (is_string($value) ? trim($value) : null);
+        if ($text !== null && preg_match('/^[+-]?\d+(\.\d+)?$/', $text) === 1) {
+            $text = ltrim($text, '+');
+            $half = str_starts_with($text, '-') ? '-0.00005' : '0.00005';
+
+            return bcadd($text, $half, self::SCALE);
+        }
+
+        // A float handed over by a caller is already binary; keep the previous rounding for it.
         return sprintf('%.4F', (float) $value);
     }
 }

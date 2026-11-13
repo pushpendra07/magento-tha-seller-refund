@@ -26,6 +26,16 @@ class ErpTransientException extends ErpException
         return $this->httpCode;
     }
 
+    /**
+     * The code recorded on the refund's audit entry: the HTTP status, or 0 for a transport failure.
+     *
+     * @return string
+     */
+    public function getErrorCode(): string
+    {
+        return (string) $this->httpCode;
+    }
+
     public function getRetryAfter(): ?int
     {
         return $this->retryAfter;

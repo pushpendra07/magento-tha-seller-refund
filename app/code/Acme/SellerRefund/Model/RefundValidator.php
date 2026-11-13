@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Acme\SellerRefund\Model;
 
 use Acme\SellerRefund\Exception\ValidationException;
+use Acme\SellerRefund\Model\Source\RefundReason;
 use Acme\SellerRefund\Model\Submission\RefundSubmission;
 use Magento\Sales\Api\Data\OrderInterface;
 
@@ -14,13 +15,7 @@ use Magento\Sales\Api\Data\OrderInterface;
  */
 class RefundValidator
 {
-    public const ALLOWED_REASONS = [
-        'defect',
-        'shortage',
-        'customer_return',
-        'price_adjustment',
-        'other',
-    ];
+    public const ALLOWED_REASONS = RefundReason::CODES;
 
     public function __construct(
         private readonly SellerLineResolver $sellerLineResolver
@@ -51,26 +46,27 @@ class RefundValidator
                 );
             }
 
+            // Seller lines are refunded in whole units; a fraction would reach the ERP as quantity 0
+            // with a non-zero amount. Checked before any arithmetic, so text is rejected cleanly.
+            if (!preg_match('/^-?\d+(\.0+)?$/', $qty)) {
+                throw new ValidationException(
+                    __('The refund quantity for order item %1 must be a whole number.', $orderItemId)
+                );
+            }
+
             if (bccomp($qty, '0', 4) <= 0) {
                 throw new ValidationException(
                     __('The refund quantity for order item %1 must be greater than zero.', $orderItemId)
                 );
             }
 
-            // BR-03: the cap is what is still refundable, not what was ordered. The prior
-            // quantities are read by the caller under the order lock.
             $qtyOrdered = (string) $sellerLines[$orderItemId]->getQtyOrdered();
-            $qtyRefundedBefore = (string) ($priorRefundedByItem[$orderItemId] ?? '0');
-            $qtyRemaining = bcsub($qtyOrdered, $qtyRefundedBefore, 4);
+            $prior = (string) ($priorRefundedByItem[$orderItemId] ?? '0');
+            $remaining = bcsub($qtyOrdered, $prior, 4);
 
-            if (bccomp($qty, $qtyRemaining, 4) === 1) {
+            if (bccomp($qty, $remaining, 4) === 1) {
                 throw new ValidationException(
-                    __(
-                        'The refund quantity %1 for order item %2 exceeds the remaining refundable quantity %3.',
-                        $qty,
-                        $orderItemId,
-                        $qtyRemaining
-                    )
+                    __('The refund quantity for order item %1 exceeds the remaining refundable quantity.', $orderItemId)
                 );
             }
         }

@@ -15,7 +15,7 @@ use Acme\SellerRefund\Model\Total\RefundTotalCalculator;
 use Acme\SellerRefund\Service\RefundProcessor;
 use Acme\SellerRefund\Test\Integration\Framework\DbTransactionTestCase;
 use Acme\SellerRefund\Test\Integration\Framework\SeedOrders;
-use Acme\SellerRefund\ViewModel\OrderHistoryRefunds;
+use Acme\SellerRefund\Block\Order\RefundHistory;
 use Magento\Customer\Model\Session as CustomerSession;
 use Magento\Framework\Registry;
 use Magento\Sales\Api\Data\OrderInterface;
@@ -23,8 +23,8 @@ use Magento\Sales\Api\OrderRepositoryInterface;
 
 /**
  * On a pure-seller order every presentation and export surface derives its figures from the
- * calculator, so the receipt, the storefront order-details block, the order-history view
- * model, the downstream sync export and the confirmation email must agree to the last unit.
+ * calculator, so the receipt, the storefront order-details block, the order-history block,
+ * the downstream sync export and the confirmation email must agree to the last unit.
  */
 class SurfacesAgreeOnPureSellerOrderTest extends DbTransactionTestCase
 {
@@ -61,14 +61,19 @@ class SurfacesAgreeOnPureSellerOrderTest extends DbTransactionTestCase
         $details = $this->create(RefundDetails::class);
         self::assertSame($expected, $this->figuresForRefund($details->getRefundViews(), $refundId));
 
-        // Surface 4: the customer order-history view model.
+        // Surface 4: the active customer order-history collection.
         $this->get(CustomerSession::class)->setCustomerId((int) $order->getCustomerId());
-        $historyFigures = $this->historyFiguresForRefund(
-            $this->get(OrderHistoryRefunds::class)->getEntries(),
-            (string) $order->getIncrementId(),
-            $refundId
-        );
-        self::assertSame($expected, $historyFigures, 'Order-history figures diverge.');
+        $history = $this->create(RefundHistory::class)->getRefunds();
+        self::assertNotNull($history);
+        $listedRefund = $history->getItemById($refundId);
+        self::assertNotNull($listedRefund, 'The refund must appear in customer history.');
+        self::assertSame((string) $order->getIncrementId(), $listedRefund->getData('order_increment_id'));
+        self::assertSame($expected, [
+            'subtotal' => $listedRefund->getSubtotalAmount(),
+            'shipping' => $listedRefund->getShippingAmount(),
+            'tax' => $listedRefund->getTaxAmount(),
+            'grand_total' => $listedRefund->getGrandTotal(),
+        ], 'Order-history snapshot figures diverge.');
 
         // Surface 5: the confirmation email's data (prepared vars, before rendering).
         self::assertSame($expected, $this->emailRefundTotals($stored), 'Email figures diverge.');
@@ -88,30 +93,6 @@ class SurfacesAgreeOnPureSellerOrderTest extends DbTransactionTestCase
         }
 
         self::fail('The refund was not present among the order-details views.');
-    }
-
-    /**
-     * @param array<int, array<string, mixed>> $entries
-     *
-     * @return array<string, string>
-     */
-    private function historyFiguresForRefund(array $entries, string $incrementId, int $refundId): array
-    {
-        foreach ($entries as $entry) {
-            if ((string) $entry['increment_id'] !== $incrementId) {
-                continue;
-            }
-            foreach ($entry['refunds'] as $refundView) {
-                if ((int) $refundView['refund']->getEntityId() === $refundId) {
-                    /** @var RefundFigures $figures */
-                    $figures = $refundView['figures'];
-
-                    return $figures->toArray()['refund'];
-                }
-            }
-        }
-
-        self::fail('The refund was not present among the order-history entries.');
     }
 
     /**

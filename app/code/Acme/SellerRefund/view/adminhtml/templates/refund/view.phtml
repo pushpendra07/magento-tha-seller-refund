@@ -1,108 +1,346 @@
 <?php
 /** @var \Acme\SellerRefund\Block\Adminhtml\Refund\View $block */
+/** @var \Magento\Framework\Escaper $escaper */
 $refund = $block->getRefund();
+$order = $block->getOrder();
 $figures = $block->getFigures();
 $currency = $figures->currency;
 $canSeeRaw = $block->canSeeRawPayload();
+$statusRows = [
+    [__('Refund Status'), $refund->getStatus()],
+    [__('ERP Create'), $refund->getCreateStatus()],
+    [__('Cash Refund'), $refund->getCashRefundStatus()],
+    [__('ERP Status Check'), $refund->getStatusCheckStatus()],
+    [__('ERP Confirm'), $refund->getConfirmStatus()],
+];
+$hasActions = $block->canRegisterCashRefund() || $block->canRetry() || $block->canCancel();
 ?>
 <div class="acme-refund-detail">
-    <section class="acme-refund-summary">
-        <h2><?= $block->escapeHtml($refund->getRefundNo()) ?></h2>
-        <table class="data table">
-            <tbody>
-                <tr><th><?= $block->escapeHtml(__('Status')) ?></th><td><?= $block->escapeHtml($refund->getStatus()) ?></td></tr>
-                <tr><th><?= $block->escapeHtml(__('Refund Type')) ?></th><td><?= $block->escapeHtml($refund->getRefundType()) ?></td></tr>
-                <tr><th><?= $block->escapeHtml(__('Create Status')) ?></th><td><?= $block->escapeHtml($refund->getCreateStatus()) ?></td></tr>
-                <tr><th><?= $block->escapeHtml(__('Cash Refund Status')) ?></th><td><?= $block->escapeHtml($refund->getCashRefundStatus()) ?></td></tr>
-                <tr><th><?= $block->escapeHtml(__('Status Check')) ?></th><td><?= $block->escapeHtml($refund->getStatusCheckStatus()) ?></td></tr>
-                <tr><th><?= $block->escapeHtml(__('Confirm Status')) ?></th><td><?= $block->escapeHtml($refund->getConfirmStatus()) ?></td></tr>
-                <tr><th><?= $block->escapeHtml(__('ERP Refund Id')) ?></th><td><?= $block->escapeHtml($refund->getErpRefundId()) ?></td></tr>
-            </tbody>
-        </table>
+
+    <section class="admin__page-section">
+        <div class="admin__page-section-title">
+            <span class="title"><?= $escaper->escapeHtml(__('Refund & Order Information')) ?></span>
+        </div>
+        <div class="admin__page-section-content">
+            <div class="admin__page-section-item">
+                <div class="admin__page-section-item-title">
+                    <span class="title"><?= $escaper->escapeHtml(__('Refund %1', $refund->getRefundNo())) ?></span>
+                </div>
+                <div class="admin__page-section-item-content">
+                    <table class="admin__table-secondary">
+                        <tbody>
+                        <tr>
+                            <th><?= $escaper->escapeHtml(__('Order #')) ?></th>
+                            <td>
+                                <a href="<?= $escaper->escapeUrl($block->getOrderUrl()) ?>">
+                                    <?= $escaper->escapeHtml($order->getIncrementId()) ?>
+                                </a>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th><?= $escaper->escapeHtml(__('Seller Order')) ?></th>
+                            <td><?= $escaper->escapeHtml($refund->getSellerOrderId()) ?></td>
+                        </tr>
+                        <tr>
+                            <th><?= $escaper->escapeHtml(__('Refund Type')) ?></th>
+                            <td><?= $escaper->escapeHtml(ucfirst((string) $refund->getRefundType())) ?></td>
+                        </tr>
+                        <tr>
+                            <th><?= $escaper->escapeHtml(__('Reason')) ?></th>
+                            <td><?= $escaper->escapeHtml($block->getReasonLabel()) ?></td>
+                        </tr>
+                        <tr>
+                            <th><?= $escaper->escapeHtml(__('Created')) ?></th>
+                            <td><?= $escaper->escapeHtml(
+                                $block->formatDate($refund->getCreatedAt(), \IntlDateFormatter::MEDIUM, true)
+                            ) ?></td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="admin__page-section-item">
+                <div class="admin__page-section-item-title">
+                    <span class="title"><?= $escaper->escapeHtml(__('ERP & Settlement')) ?></span>
+                </div>
+                <div class="admin__page-section-item-content">
+                    <table class="admin__table-secondary">
+                        <tbody>
+                        <?php foreach ($statusRows as [$label, $code]): ?>
+                            <tr>
+                                <th><?= $escaper->escapeHtml($label) ?></th>
+                                <td>
+                                    <span class="<?= $escaper->escapeHtmlAttr($block->getStatusSeverity($code)) ?>">
+                                        <span><?= $escaper->escapeHtml($block->getStatusLabel($code)) ?></span>
+                                    </span>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                        <tr>
+                            <th><?= $escaper->escapeHtml(__('ERP Refund ID')) ?></th>
+                            <td><?= $escaper->escapeHtml($refund->getErpRefundId() ?: '—') ?></td>
+                        </tr>
+                        <tr>
+                            <th><?= $escaper->escapeHtml(__('Bank Transaction')) ?></th>
+                            <td>
+                                <?php if ($refund->getTransactionNumber()): ?>
+                                    <?= $escaper->escapeHtml($refund->getTransactionNumber()) ?>
+                                    (<?= $escaper->escapeHtml($refund->getTransactionDate()) ?>)
+                                <?php else: ?>
+                                    <?= $escaper->escapeHtml(__('Not registered yet')) ?>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
     </section>
 
-    <section class="acme-refund-figures">
-        <h3><?= $block->escapeHtml(__('Pre-refund Total')) ?></h3>
-        <table class="data table">
-            <tbody>
-                <tr><th><?= $block->escapeHtml(__('Product Subtotal')) ?></th><td><?= $block->escapeHtml($block->formatMoney($figures->preRefundSubtotal, $currency)) ?></td></tr>
-                <tr><th><?= $block->escapeHtml(__('Shipping')) ?></th><td><?= $block->escapeHtml($block->formatMoney($figures->preRefundShipping, $currency)) ?></td></tr>
-                <tr><th><?= $block->escapeHtml(__('Consumption Tax')) ?></th><td><?= $block->escapeHtml($block->formatMoney($figures->preRefundTax, $currency)) ?></td></tr>
-                <tr><th><?= $block->escapeHtml(__('Total')) ?></th><td><?= $block->escapeHtml($block->formatMoney($figures->preRefundGrandTotal, $currency)) ?></td></tr>
-            </tbody>
-        </table>
-
-        <h3><?= $block->escapeHtml(__('Refund')) ?><?php if ($figures->isPartial()): ?> <?= $block->escapeHtml(__('(Partial)')) ?><?php endif; ?></h3>
-        <table class="data table">
-            <thead>
-                <tr>
-                    <th><?= $block->escapeHtml(__('SKU')) ?></th>
-                    <th><?= $block->escapeHtml(__('Product')) ?></th>
-                    <th><?= $block->escapeHtml(__('Qty')) ?></th>
-                    <th><?= $block->escapeHtml(__('Ex-tax')) ?></th>
-                    <th><?= $block->escapeHtml(__('Tax')) ?></th>
-                    <th><?= $block->escapeHtml(__('Total')) ?></th>
+    <section class="admin__page-section">
+        <div class="admin__page-section-title">
+            <span class="title">
+                <?= $escaper->escapeHtml($figures->isPartial() ? __('Refunded Items (Partial)') : __('Refunded Items')) ?>
+            </span>
+        </div>
+        <div class="admin__table-wrapper">
+            <table class="data-table admin__table-primary">
+                <thead>
+                <tr class="headings">
+                    <th><?= $escaper->escapeHtml(__('SKU')) ?></th>
+                    <th><?= $escaper->escapeHtml(__('Product')) ?></th>
+                    <th><?= $escaper->escapeHtml(__('Qty')) ?></th>
+                    <th><?= $escaper->escapeHtml(__('Ex-tax')) ?></th>
+                    <th><?= $escaper->escapeHtml(__('Shipping')) ?></th>
+                    <th><?= $escaper->escapeHtml(__('Tax')) ?></th>
+                    <th><?= $escaper->escapeHtml(__('Total')) ?></th>
                 </tr>
-            </thead>
-            <tbody>
-            <?php foreach ($figures->lines as $line): ?>
-                <tr>
-                    <td><?= $block->escapeHtml($line->sku) ?></td>
-                    <td><?= $block->escapeHtml($line->productName) ?></td>
-                    <td><?= $block->escapeHtml($line->qtyRefund) ?></td>
-                    <td><?= $block->escapeHtml($block->formatMoney($line->rowAmount, $currency)) ?></td>
-                    <td><?= $block->escapeHtml($block->formatMoney($line->taxAmount, $currency)) ?></td>
-                    <td><?= $block->escapeHtml($block->formatMoney($line->grandTotal, $currency)) ?></td>
-                </tr>
-            <?php endforeach; ?>
-            </tbody>
-            <tfoot>
-                <tr><th colspan="5"><?= $block->escapeHtml(__('Refund Total')) ?></th><td><?= $block->escapeHtml($block->formatMoney($figures->refundGrandTotal, $currency)) ?></td></tr>
-            </tfoot>
-        </table>
+                </thead>
+                <tbody>
+                <?php foreach ($figures->lines as $line): ?>
+                    <tr>
+                        <td><?= $escaper->escapeHtml($line->sku) ?></td>
+                        <td><?= $escaper->escapeHtml($line->productName) ?></td>
+                        <td><?= $escaper->escapeHtml((float) $line->qtyRefund) ?></td>
+                        <td><?= $escaper->escapeHtml($block->formatMoney($line->rowAmount, $currency)) ?></td>
+                        <td><?= $escaper->escapeHtml($block->formatMoney($line->shippingAmount, $currency)) ?></td>
+                        <td><?= $escaper->escapeHtml($block->formatMoney($line->taxAmount, $currency)) ?></td>
+                        <td><?= $escaper->escapeHtml($block->formatMoney($line->grandTotal, $currency)) ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
     </section>
 
-    <section class="acme-refund-actions">
-        <a class="action-secondary" href="<?= $block->escapeUrl($block->getActionUrl('receipt')) ?>"><?= $block->escapeHtml(__('Download Receipt')) ?></a>
+    <section class="admin__page-section">
+        <div class="admin__page-section-title">
+            <span class="title"><?= $escaper->escapeHtml(__('Totals')) ?></span>
+        </div>
+        <div class="admin__page-section-content">
+            <div class="admin__page-section-item">
+                <div class="admin__page-section-item-title">
+                    <span class="title"><?= $escaper->escapeHtml(__('Pre-refund Total (Seller Items)')) ?></span>
+                </div>
+                <table class="admin__table-secondary">
+                    <tbody>
+                    <tr><th><?= $escaper->escapeHtml(__('Product Subtotal')) ?></th>
+                        <td><?= $escaper->escapeHtml($block->formatMoney($figures->preRefundSubtotal, $currency)) ?></td></tr>
+                    <tr><th><?= $escaper->escapeHtml(__('Shipping')) ?></th>
+                        <td><?= $escaper->escapeHtml($block->formatMoney($figures->preRefundShipping, $currency)) ?></td></tr>
+                    <tr><th><?= $escaper->escapeHtml(__('Consumption Tax')) ?></th>
+                        <td><?= $escaper->escapeHtml($block->formatMoney($figures->preRefundTax, $currency)) ?></td></tr>
+                    <tr><th><strong><?= $escaper->escapeHtml(__('Total')) ?></strong></th>
+                        <td><strong><?= $escaper->escapeHtml(
+                            $block->formatMoney($figures->preRefundGrandTotal, $currency)
+                        ) ?></strong></td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="admin__page-section-item">
+                <div class="admin__page-section-item-title">
+                    <span class="title"><?= $escaper->escapeHtml(__('Refund Total')) ?></span>
+                </div>
+                <table class="admin__table-secondary">
+                    <tbody>
+                    <tr><th><?= $escaper->escapeHtml(__('Product Subtotal')) ?></th>
+                        <td><?= $escaper->escapeHtml($block->formatMoney($figures->refundSubtotal, $currency)) ?></td></tr>
+                    <tr><th><?= $escaper->escapeHtml(__('Shipping')) ?></th>
+                        <td><?= $escaper->escapeHtml($block->formatMoney($figures->refundShipping, $currency)) ?></td></tr>
+                    <tr><th><?= $escaper->escapeHtml(__('Consumption Tax')) ?></th>
+                        <td><?= $escaper->escapeHtml($block->formatMoney($figures->refundTax, $currency)) ?></td></tr>
+                    <tr><th><strong><?= $escaper->escapeHtml(__('Total')) ?></strong></th>
+                        <td><strong><?= $escaper->escapeHtml(
+                            $block->formatMoney($figures->refundGrandTotal, $currency)
+                        ) ?></strong></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </section>
 
-    <section class="acme-refund-audit">
-        <h3><?= $block->escapeHtml(__('Audit Log')) ?></h3>
-        <table class="data table">
-            <thead>
-                <tr>
-                    <th><?= $block->escapeHtml(__('When')) ?></th>
-                    <th><?= $block->escapeHtml(__('Event')) ?></th>
-                    <th><?= $block->escapeHtml(__('Status')) ?></th>
-                    <th><?= $block->escapeHtml(__('From')) ?></th>
-                    <th><?= $block->escapeHtml(__('To')) ?></th>
-                    <th><?= $block->escapeHtml(__('API')) ?></th>
-                    <th><?= $block->escapeHtml(__('Attempt')) ?></th>
-                    <th><?= $block->escapeHtml(__('Error')) ?></th>
+    <?php if ($hasActions): ?>
+        <section class="admin__page-section acme-refund-actions" id="acme-refund-actions">
+            <div class="admin__page-section-title">
+                <span class="title"><?= $escaper->escapeHtml(__('Actions')) ?></span>
+            </div>
+
+            <?php if ($block->canRegisterCashRefund()): ?>
+                <fieldset class="admin__fieldset acme-refund-cash">
+                    <legend class="admin__legend">
+                        <span><?= $escaper->escapeHtml(__('Refund Complete: register the bank transfer')) ?></span>
+                    </legend>
+                    <div class="admin__field _required">
+                        <label class="admin__field-label" for="acme-refund-txn-number">
+                            <span><?= $escaper->escapeHtml(__('Bank Transaction Number')) ?></span>
+                        </label>
+                        <div class="admin__field-control">
+                            <input id="acme-refund-txn-number" class="admin__control-text" type="text"
+                                   maxlength="64" data-role="txn-number"/>
+                        </div>
+                    </div>
+                    <div class="admin__field _required">
+                        <label class="admin__field-label" for="acme-refund-txn-date">
+                            <span><?= $escaper->escapeHtml(__('Transaction Date')) ?></span>
+                        </label>
+                        <div class="admin__field-control">
+                            <input id="acme-refund-txn-date" class="admin__control-text" type="date"
+                                   max="<?= $escaper->escapeHtmlAttr($block->getTodayDate()) ?>"
+                                   data-role="txn-date"/>
+                        </div>
+                    </div>
+                    <div class="admin__field">
+                        <div class="admin__field-control">
+                            <button type="button" class="action-primary" data-role="complete">
+                                <span><?= $escaper->escapeHtml(__('Register Cash Refund')) ?></span>
+                            </button>
+                        </div>
+                    </div>
+                </fieldset>
+            <?php endif; ?>
+
+            <div class="acme-refund-action-buttons">
+                <?php if ($block->canRetry()): ?>
+                    <button type="button" class="action-secondary" data-role="retry">
+                        <span><?= $escaper->escapeHtml(__('Retry ERP Operation')) ?></span>
+                    </button>
+                <?php endif; ?>
+                <?php if ($block->canCancel()): ?>
+                    <button type="button" class="action-secondary" data-role="cancel">
+                        <span><?= $escaper->escapeHtml(__('Cancel Refund')) ?></span>
+                    </button>
+                <?php endif; ?>
+            </div>
+
+            <p class="message" data-role="action-message" hidden="hidden"></p>
+        </section>
+
+        <script type="text/x-magento-init">
+            {
+                "#acme-refund-actions": {
+                    "acmeRefundActions": <?= /* @noEscape */ json_encode(
+                        $block->getActionsConfig(),
+                        JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP
+                    ) ?>
+                }
+            }
+        </script>
+    <?php endif; ?>
+
+    <section class="admin__page-section acme-refund-audit" id="acme-refund-audit">
+        <div class="admin__page-section-title">
+            <span class="title"><?= $escaper->escapeHtml(__('Audit Log')) ?></span>
+        </div>
+        <div class="admin__table-wrapper">
+            <table class="data-table admin__table-primary">
+                <thead>
+                <tr class="headings">
+                    <th><?= $escaper->escapeHtml(__('When')) ?></th>
+                    <th><?= $escaper->escapeHtml(__('Event')) ?></th>
+                    <th><?= $escaper->escapeHtml(__('Result')) ?></th>
+                    <th><?= $escaper->escapeHtml(__('Status Change')) ?></th>
+                    <th><?= $escaper->escapeHtml(__('API')) ?></th>
+                    <th><?= $escaper->escapeHtml(__('Attempt')) ?></th>
+                    <th><?= $escaper->escapeHtml(__('Error')) ?></th>
                     <?php if ($canSeeRaw): ?>
-                        <th><?= $block->escapeHtml(__('Request')) ?></th>
-                        <th><?= $block->escapeHtml(__('Response')) ?></th>
+                        <th><?= $escaper->escapeHtml(__('Request / Response')) ?></th>
                     <?php endif; ?>
                 </tr>
-            </thead>
-            <tbody>
-            <?php foreach ($block->getEvents() as $event): ?>
-                <tr>
-                    <td><?= $block->escapeHtml($event->getCreatedAt()) ?></td>
-                    <td><?= $block->escapeHtml($event->getEventType()) ?></td>
-                    <td><?= $block->escapeHtml($event->getEventStatus()) ?></td>
-                    <td><?= $block->escapeHtml($event->getStatusFrom()) ?></td>
-                    <td><?= $block->escapeHtml($event->getStatusTo()) ?></td>
-                    <td><?= $block->escapeHtml($event->getApiCode()) ?></td>
-                    <td><?= $block->escapeHtml($event->getAttemptNo()) ?></td>
-                    <td><?= $block->escapeHtml($event->getErrorCode()) ?></td>
-                    <?php if ($canSeeRaw): ?>
-                        <td><pre><?= $block->escapeHtml($event->getRequestPayload()) ?></pre></td>
-                        <td><pre><?= $block->escapeHtml($event->getResponsePayload()) ?></pre></td>
-                    <?php endif; ?>
-                </tr>
-            <?php endforeach; ?>
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                <?php foreach ($block->getEvents() as $index => $event): ?>
+                    <?php
+                    $request = $block->formatPayload($event->getRequestPayload());
+                    $response = $block->formatPayload($event->getResponsePayload());
+                    $payloadId = 'acme-refund-payload-' . $index;
+                    $eventName = $block->humanize($event->getEventType());
+                    ?>
+                    <tr>
+                        <td><?= $escaper->escapeHtml(
+                            $block->formatDate($event->getCreatedAt(), \IntlDateFormatter::MEDIUM, true)
+                        ) ?></td>
+                        <td><?= $escaper->escapeHtml($eventName) ?></td>
+                        <td>
+                            <span class="<?= $escaper->escapeHtmlAttr(
+                                $block->getStatusSeverity($event->getEventStatus())
+                            ) ?>">
+                                <span><?= $escaper->escapeHtml($block->getStatusLabel($event->getEventStatus())) ?></span>
+                            </span>
+                        </td>
+                        <td>
+                            <?php if ($event->getStatusTo()): ?>
+                                <?= $escaper->escapeHtml($block->getStatusLabel($event->getStatusFrom() ?: null)) ?>
+                                &rarr;
+                                <?= $escaper->escapeHtml($block->getStatusLabel($event->getStatusTo())) ?>
+                            <?php endif; ?>
+                        </td>
+                        <td><?= $escaper->escapeHtml($block->humanize($event->getApiCode())) ?></td>
+                        <td><?= $escaper->escapeHtml($event->getAttemptNo()) ?></td>
+                        <td>
+                            <?= $escaper->escapeHtml($event->getErrorCode()) ?>
+                            <?php $correlationId = $block->getErrorCorrelationId($event); ?>
+                            <?php if ($correlationId !== null): ?>
+                                <div class="acme-refund-correlation">
+                                    <?= $escaper->escapeHtml(__('Ref: %1', $correlationId)) ?>
+                                </div>
+                            <?php endif; ?>
+                        </td>
+                        <?php if ($canSeeRaw): ?>
+                            <td>
+                                <?php if ($request !== '' || $response !== ''): ?>
+                                    <button type="button" class="action-secondary action-small"
+                                            data-role="show-payload"
+                                            data-target="#<?= $escaper->escapeHtmlAttr($payloadId) ?>"
+                                            data-title="<?= $escaper->escapeHtmlAttr(
+                                                __('%1 · attempt %2', $eventName, $event->getAttemptNo())
+                                            ) ?>">
+                                        <span><?= $escaper->escapeHtml(__('View')) ?></span>
+                                    </button>
+                                    <div id="<?= $escaper->escapeHtmlAttr($payloadId) ?>" hidden="hidden">
+                                        <div class="acme-refund-payload">
+                                            <h3><?= $escaper->escapeHtml(__('Request')) ?></h3>
+                                            <pre><?= $escaper->escapeHtml($request !== '' ? $request : __('No request recorded.')) ?></pre>
+                                            <h3><?= $escaper->escapeHtml(__('Response')) ?></h3>
+                                            <pre><?= $escaper->escapeHtml($response !== '' ? $response : __('No response recorded.')) ?></pre>
+                                        </div>
+                                    </div>
+                                <?php endif; ?>
+                            </td>
+                        <?php endif; ?>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
     </section>
+
+    <script type="text/x-magento-init">
+        {
+            "#acme-refund-audit": {
+                "acmeRefundAudit": {}
+            }
+        }
+    </script>
 </div>

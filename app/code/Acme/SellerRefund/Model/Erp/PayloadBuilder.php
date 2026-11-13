@@ -6,7 +6,6 @@ namespace Acme\SellerRefund\Model\Erp;
 
 use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\Data\RefundItemInterface;
-use Magento\Sales\Api\Data\OrderInterface;
 
 /**
  * Builds the ERP Refund API request bodies from the stored refund snapshot (FRD 9.1).
@@ -20,7 +19,7 @@ class PayloadBuilder
      *
      * @return array<string, mixed>
      */
-    public function build(RefundInterface $refund, array $items, OrderInterface $order): array
+    public function build(RefundInterface $refund, array $items): array
     {
         $lines = [];
         foreach ($items as $item) {

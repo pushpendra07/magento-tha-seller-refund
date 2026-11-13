@@ -8,12 +8,16 @@ use Acme\SellerRefund\Api\Data\RefundEventInterface;
 use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\RefundRepositoryInterface;
 use Acme\SellerRefund\Exception\IllegalTransitionException;
+use Acme\SellerRefund\Exception\NotEligibleException;
+use Acme\SellerRefund\Exception\StaleRefundException;
+use Acme\SellerRefund\Exception\ValidationException;
 use Acme\SellerRefund\Model\Erp\ErpRefundClient;
 use Acme\SellerRefund\Model\Erp\Exception\ErpBusinessException;
 use Acme\SellerRefund\Model\Erp\Exception\ErpConflictException;
 use Acme\SellerRefund\Model\Erp\Exception\ErpTransientException;
 use Acme\SellerRefund\Model\Erp\PayloadBuilder;
 use Acme\SellerRefund\Model\Erp\RequestKeyFactory;
+use Acme\SellerRefund\Model\Erp\PayloadValidator;
 use Acme\SellerRefund\Model\Event\EventRecorder;
 use Acme\SellerRefund\Model\Outbox\Outbox;
 use Acme\SellerRefund\Model\RefundFactory;
@@ -25,6 +29,7 @@ use Acme\SellerRefund\Model\ResourceModel\OrderLock;
 use Acme\SellerRefund\Model\ResourceModel\PriorRefundQuantity;
 use Acme\SellerRefund\Model\ResourceModel\Refund as RefundResource;
 use Acme\SellerRefund\Model\ResourceModel\RefundItem as RefundItemResource;
+use Acme\SellerRefund\Model\RefundEligibility;
 use Acme\SellerRefund\Model\SellerLineResolver;
 use Acme\SellerRefund\Model\Submission\RefundSubmission;
 use Acme\SellerRefund\Model\Total\RefundTotalCalculator;
@@ -39,6 +44,29 @@ use Magento\Sales\Api\OrderRepositoryInterface;
  */
 class RefundProcessor
 {
+    /**
+     * Outbox operation => [sub-status field, audit event type, api code].
+     */
+    private const OPERATION_SUB_STATUS = [
+        Outbox::OP_CREATE => [RefundInterface::CREATE_STATUS, RefundEventInterface::TYPE_ERP_CREATE, 'create'],
+        Outbox::OP_STATUS_CHECK => [
+            RefundInterface::STATUS_CHECK_STATUS,
+            RefundEventInterface::TYPE_ERP_STATUS,
+            'status',
+        ],
+        Outbox::OP_CONFIRM => [RefundInterface::CONFIRM_STATUS, RefundEventInterface::TYPE_ERP_CONFIRM, 'confirm'],
+    ];
+
+    /**
+     * ERP credit-note state that may be confirmed (FRD section 9.2).
+     */
+    private const ERP_STATUS_PENDING = 'refund-pending';
+
+    /**
+     * Column size of mp_refund.transaction_number.
+     */
+    private const TRANSACTION_NUMBER_MAX = 64;
+
     public function __construct(
         private readonly RefundRepositoryInterface $refundRepository,
         private readonly ResourceConnection $resource,
@@ -60,6 +88,8 @@ class RefundProcessor
         private readonly PayloadBuilder $payloadBuilder,
         private readonly EventManagerInterface $eventManager,
         private readonly TimezoneInterface $timezone,
+        private readonly RefundEligibility $eligibility,
+        private readonly PayloadValidator $payloadValidator,
         private readonly RequestKeyFactory $requestKeyFactory
     ) {
     }
@@ -71,6 +101,16 @@ class RefundProcessor
         try {
             $this->orderLock->lock($orderId);
             $order = $this->orderRepository->get($orderId);
+
+            // BR-01/BR-02 are enforced here, under the order lock, not only by hiding the
+            // admin button: a direct request must not refund an expired or ineligible order.
+            $eligibility = $this->eligibility->check($order, $this->timezone->date());
+            if (!$eligibility->isEligible()) {
+                throw new NotEligibleException(
+                    __('This order cannot be refunded (%1).', implode(', ', $eligibility->getReasons()))
+                );
+            }
+
             $prior = $this->priorRefundQuantity->sumRefundedByOrderItem($orderId);
             $this->validator->validate($order, $submission, $prior);
 
@@ -134,13 +174,30 @@ class RefundProcessor
         }
 
         $items = $this->refundRepository->getItems($refundId);
-        $order = $this->orderRepository->get($refund->getOrderId());
-        $payload = $this->payloadBuilder->build($refund, $items, $order);
+        $payload = $this->payloadBuilder->build($refund, $items);
+        $this->guardRequest(
+            $refund,
+            RefundInterface::CREATE_STATUS,
+            RefundEventInterface::TYPE_ERP_CREATE,
+            'create',
+            $attemptNo,
+            $payload,
+            fn () => $this->payloadValidator->validateCreate($payload)
+        );
+
+        // Claim the Create before calling the ERP (BR-09). The versioned write makes a cancel that
+        // read the refund earlier fail, and once create_status is pending canCancel() refuses it.
+        // If a cancel (or another worker) wrote first, this claim fails and nothing is sent.
+        try {
+            $this->stateMachine->setSubStatus($refund, RefundInterface::CREATE_STATUS, RefundInterface::SUB_PENDING);
+        } catch (StaleRefundException $e) {
+            return;
+        }
+
         $requestKey = $this->requestKeyFactory->create([
             'refundNo' => (string) $refund->getRefundNo(),
             'attemptNo' => $attemptNo,
         ]);
-
         $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_CREATE, RefundInterface::SUB_PENDING, [
             'api_code' => 'create',
             'attempt_no' => $attemptNo,
@@ -156,7 +213,7 @@ class RefundProcessor
                 'api_code' => 'create',
                 'attempt_no' => $attemptNo,
                 'request_key' => $requestKey->getValue(),
-                'error_code' => (string) $e->getHttpCode(),
+                'error_code' => $e->getErrorCode(),
             ]);
             throw $e;
         } catch (ErpBusinessException $e) {
@@ -174,13 +231,11 @@ class RefundProcessor
             ]);
             return;
         } catch (ErpConflictException $e) {
-            $this->stateMachine->transition(
-                $refund,
-                RefundInterface::STATUS_FAILED,
-                RefundEventInterface::TYPE_ERP_CREATE,
-                [RefundInterface::CREATE_STATUS => RefundInterface::SUB_BUSINESS_REJECTED]
-            );
-            $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_CREATE, RefundInterface::SUB_BUSINESS_REJECTED, [
+            // HTTP 409: the ERP already holds a credit note for this refund_no with a different
+            // payload. Moving to failed would release the quantity for another refund while that
+            // credit note exists, so the refund is held at calculated for reconciliation instead.
+            $this->stateMachine->setSubStatus($refund, RefundInterface::CREATE_STATUS, RefundInterface::SUB_CONFLICT);
+            $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_CREATE, RefundInterface::SUB_CONFLICT, [
                 'api_code' => 'create',
                 'attempt_no' => $attemptNo,
                 'request_key' => $requestKey->getValue(),
@@ -208,25 +263,92 @@ class RefundProcessor
 
     public function registerCashRefund(int $refundId, string $txnNumber, string $txnDate, ?int $actorId): void
     {
+        $txnNumber = trim($txnNumber);
+        $this->assertCashRegistration($txnNumber, trim($txnDate));
+        $txnDate = trim($txnDate);
+
         $refund = $this->refundRepository->getById($refundId);
-        $this->stateMachine->transition(
-            $refund,
-            RefundInterface::STATUS_CASH_REFUNDED,
-            RefundEventInterface::TYPE_CASH_REGISTERED,
-            [
-                RefundInterface::CASH_REFUND_STATUS => RefundInterface::SUB_SUCCEEDED,
-                RefundInterface::TRANSACTION_NUMBER => $txnNumber,
-                RefundInterface::TRANSACTION_DATE => $txnDate,
-            ],
-            $actorId
-        );
-        $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_CASH_REGISTERED, RefundInterface::SUB_SUCCEEDED, [
-            'created_by' => $actorId,
-        ]);
-        $this->outbox->enqueue($refundId, Outbox::OP_STATUS_CHECK);
+        // The registration, its audit entry and the status-check job are committed together.
+        $this->inTransaction(function () use ($refund, $refundId, $txnNumber, $txnDate, $actorId): void {
+            $this->stateMachine->transition(
+                $refund,
+                RefundInterface::STATUS_CASH_REFUNDED,
+                RefundEventInterface::TYPE_CASH_REGISTERED,
+                [
+                    RefundInterface::CASH_REFUND_STATUS => RefundInterface::SUB_SUCCEEDED,
+                    RefundInterface::TRANSACTION_NUMBER => $txnNumber,
+                    RefundInterface::TRANSACTION_DATE => $txnDate,
+                ],
+                $actorId
+            );
+            $this->eventRecorder->record(
+                $refundId,
+                RefundEventInterface::TYPE_CASH_REGISTERED,
+                RefundInterface::SUB_SUCCEEDED,
+                ['created_by' => $actorId]
+            );
+            $this->outbox->enqueue($refundId, Outbox::OP_STATUS_CHECK);
+        });
     }
 
-    public function checkStatus(int $refundId): void
+    /**
+     * Records a rejected or conflicting Read Status / Confirm call on the refund and rethrows it.
+     *
+     * The cash has already been paid, so the main status stays as it is and the quantity stays
+     * counted. The sub-status and audit entry show what the ERP answered, and the outbox
+     * dead-letters the job for an operator to resolve and replay (FRD 9.6).
+     *
+     * @param RefundInterface $refund
+     * @param string $subStatusField
+     * @param string $eventType
+     * @param string $apiCode
+     * @param int $attemptNo
+     * @param ErpBusinessException|ErpConflictException $e
+     * @return never
+     * @throws ErpBusinessException|ErpConflictException
+     */
+    private function holdForOperator(
+        RefundInterface $refund,
+        string $subStatusField,
+        string $eventType,
+        string $apiCode,
+        int $attemptNo,
+        ErpBusinessException|ErpConflictException $e
+    ): never {
+        $subStatus = $e instanceof ErpConflictException
+            ? RefundInterface::SUB_CONFLICT
+            : RefundInterface::SUB_BUSINESS_REJECTED;
+        $this->stateMachine->setSubStatus($refund, $subStatusField, $subStatus);
+        $this->eventRecorder->record((int) $refund->getEntityId(), $eventType, $subStatus, [
+            'api_code' => $apiCode,
+            'attempt_no' => $attemptNo,
+            'error_code' => $e instanceof ErpBusinessException ? $e->getErpErrorCode() : 'conflict',
+        ]);
+
+        throw $e;
+    }
+
+    /**
+     * Runs the given writes in one database transaction, so a state change and the job that
+     * follows it are committed together or not at all.
+     *
+     * @param callable $work
+     * @return void
+     */
+    private function inTransaction(callable $work): void
+    {
+        $connection = $this->resource->getConnection();
+        $connection->beginTransaction();
+        try {
+            $work();
+            $connection->commit();
+        } catch (\Throwable $e) {
+            $connection->rollBack();
+            throw $e;
+        }
+    }
+
+    public function checkStatus(int $refundId, int $attemptNo = 1): void
     {
         $refund = $this->refundRepository->getById($refundId);
         if ($refund->getStatus() !== RefundInterface::STATUS_CASH_REFUNDED) {
@@ -234,6 +356,15 @@ class RefundProcessor
         }
 
         $erpId = (string) $refund->getErpRefundId();
+        $this->guardRequest(
+            $refund,
+            RefundInterface::STATUS_CHECK_STATUS,
+            RefundEventInterface::TYPE_ERP_STATUS,
+            'status',
+            $attemptNo,
+            ['erp_refund_id' => $erpId],
+            fn () => $this->payloadValidator->validateErpRefundId($erpId)
+        );
         $this->stateMachine->setSubStatus($refund, RefundInterface::STATUS_CHECK_STATUS, RefundInterface::SUB_PENDING);
 
         try {
@@ -242,25 +373,66 @@ class RefundProcessor
             $this->stateMachine->setSubStatus($refund, RefundInterface::STATUS_CHECK_STATUS, RefundInterface::SUB_RETRYABLE_ERROR);
             $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_STATUS, RefundInterface::SUB_RETRYABLE_ERROR, [
                 'api_code' => 'status',
-                'error_code' => (string) $e->getHttpCode(),
+                'attempt_no' => $attemptNo,
+                'error_code' => $e->getErrorCode(),
             ]);
             throw $e;
+        } catch (ErpBusinessException | ErpConflictException $e) {
+            $this->holdForOperator(
+                $refund,
+                RefundInterface::STATUS_CHECK_STATUS,
+                RefundEventInterface::TYPE_ERP_STATUS,
+                'status',
+                $attemptNo,
+                $e
+            );
+        }
+
+        // Read-before-confirm (FRD sections 3 and 9.2): confirm only a credit note the ERP still
+        // shows as refund-pending. Anything else needs a person, so the job is dead-lettered.
+        $erpStatus = (string) ($response['status'] ?? '');
+        if ($erpStatus !== self::ERP_STATUS_PENDING) {
+            $this->stateMachine->setSubStatus(
+                $refund,
+                RefundInterface::STATUS_CHECK_STATUS,
+                RefundInterface::SUB_BUSINESS_REJECTED
+            );
+            $this->eventRecorder->record(
+                $refundId,
+                RefundEventInterface::TYPE_ERP_STATUS,
+                RefundInterface::SUB_BUSINESS_REJECTED,
+                [
+                    'api_code' => 'status',
+                    'attempt_no' => $attemptNo,
+                    'error_code' => 'unexpected_status',
+                    'response_payload' => $response,
+                ]
+            );
+            throw new ErpBusinessException(
+                sprintf('The ERP reports credit note %s as "%s", not refund-pending.', $erpId, $erpStatus),
+                'unexpected_status'
+            );
         }
 
         $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_STATUS, RefundInterface::SUB_SUCCEEDED, [
             'api_code' => 'status',
+            'attempt_no' => $attemptNo,
             'response_payload' => $response,
         ]);
-        $this->stateMachine->transition(
-            $refund,
-            RefundInterface::STATUS_ERP_CONFIRM_PENDING,
-            RefundEventInterface::TYPE_ERP_STATUS,
-            [RefundInterface::STATUS_CHECK_STATUS => RefundInterface::SUB_SUCCEEDED]
-        );
-        $this->outbox->enqueue($refundId, Outbox::OP_CONFIRM);
+        // The new state and its Confirm job are committed together: if only the state were saved,
+        // nothing would ever send the Confirm (the reconciler only looks at cash_refunded).
+        $this->inTransaction(function () use ($refund, $refundId): void {
+            $this->stateMachine->transition(
+                $refund,
+                RefundInterface::STATUS_ERP_CONFIRM_PENDING,
+                RefundEventInterface::TYPE_ERP_STATUS,
+                [RefundInterface::STATUS_CHECK_STATUS => RefundInterface::SUB_SUCCEEDED]
+            );
+            $this->outbox->enqueue($refundId, Outbox::OP_CONFIRM);
+        });
     }
 
-    public function confirm(int $refundId): void
+    public function confirm(int $refundId, int $attemptNo = 1): void
     {
         $refund = $this->refundRepository->getById($refundId);
         if ($refund->getStatus() !== RefundInterface::STATUS_ERP_CONFIRM_PENDING) {
@@ -269,6 +441,15 @@ class RefundProcessor
 
         $erpId = (string) $refund->getErpRefundId();
         $payload = $this->payloadBuilder->buildConfirm($refund);
+        $this->guardRequest(
+            $refund,
+            RefundInterface::CONFIRM_STATUS,
+            RefundEventInterface::TYPE_ERP_CONFIRM,
+            'confirm',
+            $attemptNo,
+            $payload,
+            fn () => $this->payloadValidator->validateConfirm($erpId, $payload)
+        );
         $this->stateMachine->setSubStatus($refund, RefundInterface::CONFIRM_STATUS, RefundInterface::SUB_PENDING);
 
         try {
@@ -277,13 +458,24 @@ class RefundProcessor
             $this->stateMachine->setSubStatus($refund, RefundInterface::CONFIRM_STATUS, RefundInterface::SUB_RETRYABLE_ERROR);
             $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_CONFIRM, RefundInterface::SUB_RETRYABLE_ERROR, [
                 'api_code' => 'confirm',
-                'error_code' => (string) $e->getHttpCode(),
+                'attempt_no' => $attemptNo,
+                'error_code' => $e->getErrorCode(),
             ]);
             throw $e;
+        } catch (ErpBusinessException | ErpConflictException $e) {
+            $this->holdForOperator(
+                $refund,
+                RefundInterface::CONFIRM_STATUS,
+                RefundEventInterface::TYPE_ERP_CONFIRM,
+                'confirm',
+                $attemptNo,
+                $e
+            );
         }
 
         $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_CONFIRM, RefundInterface::SUB_SUCCEEDED, [
             'api_code' => 'confirm',
+            'attempt_no' => $attemptNo,
             'response_payload' => $response,
         ]);
         $this->stateMachine->transition(
@@ -338,9 +530,45 @@ class RefundProcessor
             'created_by' => $actorId,
         ]);
 
+        // The replayed call is queued again, so it is no longer "retries exhausted".
+        $field = self::OPERATION_SUB_STATUS[$operation][0];
+        $current = match ($operation) {
+            Outbox::OP_CREATE => $refund->getCreateStatus(),
+            Outbox::OP_STATUS_CHECK => $refund->getStatusCheckStatus(),
+            default => $refund->getConfirmStatus(),
+        };
+        if ($current === RefundInterface::SUB_RETRIES_EXHAUSTED) {
+            $this->stateMachine->setSubStatus($refund, $field, RefundInterface::SUB_PENDING);
+        }
+
         if (!$this->outbox->hasPending($refundId)) {
             $this->outbox->enqueue($refundId, $operation);
         }
+    }
+
+    /**
+     * Record that the outbox stopped retrying an ERP call after its last allowed attempt.
+     *
+     * The main status is unchanged (FRD 7: transient errors never change it); the call's
+     * sub-status says the retries are used up, so the refund waits for an operator replay.
+     *
+     * @param int $refundId
+     * @param string $operation Outbox::OP_* value
+     * @param int $attemptNo the last attempt made
+     * @return void
+     */
+    public function markRetriesExhausted(int $refundId, string $operation, int $attemptNo): void
+    {
+        if (!isset(self::OPERATION_SUB_STATUS[$operation])) {
+            return;
+        }
+        [$field, $eventType, $apiCode] = self::OPERATION_SUB_STATUS[$operation];
+        $refund = $this->refundRepository->getById($refundId);
+        $this->stateMachine->setSubStatus($refund, $field, RefundInterface::SUB_RETRIES_EXHAUSTED);
+        $this->eventRecorder->record($refundId, $eventType, RefundInterface::SUB_RETRIES_EXHAUSTED, [
+            'api_code' => $apiCode,
+            'attempt_no' => $attemptNo,
+        ]);
     }
 
     private function saveItems(int $refundId, \Acme\SellerRefund\Model\Total\RefundFigures $figures, \Magento\Sales\Api\Data\OrderInterface $order, array $prior): void
@@ -379,5 +607,74 @@ class RefundProcessor
     private function stringOrNull(mixed $value): ?string
     {
         return $value === null || $value === '' ? null : (string) $value;
+    }
+
+    /**
+     * Check an ERP request locally; when it can never succeed, record why and stop before HTTP.
+     *
+     * @param RefundInterface $refund
+     * @param string $subStatusField
+     * @param string $eventType
+     * @param string $apiCode
+     * @param int $attemptNo
+     * @param array $payload
+     * @param callable $check throws ValidationException when the request is invalid
+     * @return void
+     * @throws ValidationException
+     */
+    private function guardRequest(
+        RefundInterface $refund,
+        string $subStatusField,
+        string $eventType,
+        string $apiCode,
+        int $attemptNo,
+        array $payload,
+        callable $check
+    ): void {
+        try {
+            $check();
+        } catch (ValidationException $e) {
+            $this->stateMachine->setSubStatus($refund, $subStatusField, RefundInterface::SUB_INVALID_PAYLOAD);
+            $this->eventRecorder->record(
+                (int) $refund->getEntityId(),
+                $eventType,
+                RefundInterface::SUB_INVALID_PAYLOAD,
+                [
+                    'api_code' => $apiCode,
+                    'attempt_no' => $attemptNo,
+                    'error_code' => 'invalid_payload',
+                    'request_payload' => $payload,
+                ]
+            );
+            throw $e;
+        }
+    }
+
+    /**
+     * BR-10: a cash refund needs a real bank transaction number and date before the ERP is told.
+     *
+     * @param string $txnNumber
+     * @param string $txnDate
+     * @return void
+     * @throws ValidationException
+     */
+    private function assertCashRegistration(string $txnNumber, string $txnDate): void
+    {
+        if ($txnNumber === '') {
+            throw new ValidationException(__('Enter the bank transaction number.'));
+        }
+        if (mb_strlen($txnNumber) > self::TRANSACTION_NUMBER_MAX) {
+            throw new ValidationException(
+                __('The bank transaction number can have at most %1 characters.', self::TRANSACTION_NUMBER_MAX)
+            );
+        }
+
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $txnDate);
+        if ($date === false || $date->format('Y-m-d') !== $txnDate) {
+            throw new ValidationException(__('Enter the transaction date as YYYY-MM-DD.'));
+        }
+        if ($txnDate > $this->timezone->date()->format('Y-m-d')) {
+            throw new ValidationException(__('The transaction date cannot be in the future.'));
+        }
     }
 }

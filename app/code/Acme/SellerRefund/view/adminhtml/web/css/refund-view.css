@@ -1,0 +1,47 @@
+.acme-refund-payload h3 {
+    margin: 0 0 8px;
+    font-size: 1.6rem;
+}
+
+.acme-refund-payload h3 + pre {
+    margin-bottom: 20px;
+}
+
+.acme-refund-payload pre {
+    max-height: 40vh;
+    overflow: auto;
+    padding: 12px;
+    border: 1px solid #e3e3e3;
+    background: #f8f8f8;
+    font-size: 1.2rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.acme-refund-action-buttons button + button {
+    margin-left: 10px;
+}
+
+.acme-refund-detail .admin__page-section-item-title .title {
+    font-weight: 600;
+}
+
+.acme-refund-detail .admin__page-section-content {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 30px;
+}
+
+.acme-refund-detail .admin__page-section-content > .admin__page-section-item {
+    flex: 1 1 380px;
+    min-width: 0;
+    float: none;
+    width: auto;
+    margin: 0;
+}
+
+.acme-refund-detail [class^="grid-severity-"] {
+    display: inline-block;
+    padding: 0 12px;
+}

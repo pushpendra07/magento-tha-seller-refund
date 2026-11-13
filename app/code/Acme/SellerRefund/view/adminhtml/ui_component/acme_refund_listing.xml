@@ -1,0 +1,149 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Seller Refunds worklist (FRD 10.2): Magento's standard admin grid with filters, paging,
+ * sorting and column controls.
+ */
+-->
+<listing xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Ui:etc/ui_configuration.xsd">
+    <argument name="data" xsi:type="array">
+        <item name="js_config" xsi:type="array">
+            <item name="provider" xsi:type="string">acme_refund_listing.acme_refund_listing_data_source</item>
+        </item>
+    </argument>
+    <settings>
+        <spinner>acme_refund_columns</spinner>
+        <deps>
+            <dep>acme_refund_listing.acme_refund_listing_data_source</dep>
+        </deps>
+    </settings>
+    <dataSource name="acme_refund_listing_data_source" component="Magento_Ui/js/grid/provider">
+        <settings>
+            <storageConfig>
+                <param name="indexField" xsi:type="string">entity_id</param>
+            </storageConfig>
+            <updateUrl path="mui/index/render"/>
+        </settings>
+        <aclResource>Acme_SellerRefund::view</aclResource>
+        <dataProvider class="Magento\Framework\View\Element\UiComponent\DataProvider\DataProvider"
+                      name="acme_refund_listing_data_source">
+            <settings>
+                <requestFieldName>id</requestFieldName>
+                <primaryFieldName>entity_id</primaryFieldName>
+            </settings>
+        </dataProvider>
+    </dataSource>
+    <listingToolbar name="listing_top">
+        <settings>
+            <sticky>true</sticky>
+        </settings>
+        <bookmark name="bookmarks"/>
+        <columnsControls name="columns_controls"/>
+        <filters name="listing_filters"/>
+        <paging name="listing_paging"/>
+    </listingToolbar>
+    <columns name="acme_refund_columns">
+        <column name="refund_no" sortOrder="10">
+            <settings>
+                <filter>text</filter>
+                <label translate="true">Refund No</label>
+            </settings>
+        </column>
+        <column name="order_increment_id" sortOrder="20">
+            <settings>
+                <filter>text</filter>
+                <label translate="true">Order #</label>
+            </settings>
+        </column>
+        <column name="seller_order_id" sortOrder="30">
+            <settings>
+                <filter>text</filter>
+                <label translate="true">Seller Order</label>
+            </settings>
+        </column>
+        <column name="status" component="Magento_Ui/js/grid/columns/select" sortOrder="40">
+            <settings>
+                <options class="Acme\SellerRefund\Model\Source\RefundStatus"/>
+                <filter>select</filter>
+                <dataType>select</dataType>
+                <label translate="true">Status</label>
+            </settings>
+        </column>
+        <column name="create_status" component="Magento_Ui/js/grid/columns/select" sortOrder="50">
+            <settings>
+                <options class="Acme\SellerRefund\Model\Source\RefundSubStatus"/>
+                <filter>select</filter>
+                <dataType>select</dataType>
+                <label translate="true">ERP Create</label>
+            </settings>
+        </column>
+        <column name="status_check_status" component="Magento_Ui/js/grid/columns/select" sortOrder="52">
+            <settings>
+                <options class="Acme\SellerRefund\Model\Source\RefundSubStatus"/>
+                <filter>select</filter>
+                <dataType>select</dataType>
+                <label translate="true">ERP Status Check</label>
+            </settings>
+        </column>
+        <column name="confirm_status" component="Magento_Ui/js/grid/columns/select" sortOrder="54">
+            <settings>
+                <options class="Acme\SellerRefund\Model\Source\RefundSubStatus"/>
+                <filter>select</filter>
+                <dataType>select</dataType>
+                <label translate="true">ERP Confirm</label>
+            </settings>
+        </column>
+        <column name="needs_attention" component="Magento_Ui/js/grid/columns/select" sortOrder="56">
+            <settings>
+                <options class="Magento\Config\Model\Config\Source\Yesno"/>
+                <filter>select</filter>
+                <dataType>select</dataType>
+                <label translate="true">Needs Attention</label>
+            </settings>
+        </column>
+        <column name="refund_type" sortOrder="60">
+            <settings>
+                <filter>text</filter>
+                <label translate="true">Type</label>
+            </settings>
+        </column>
+        <column name="line_count" sortOrder="70">
+            <settings>
+                <label translate="true">Lines</label>
+                <sortable>false</sortable>
+            </settings>
+        </column>
+        <column name="qty_refund_total" sortOrder="80">
+            <settings>
+                <label translate="true">Refund Qty</label>
+                <sortable>false</sortable>
+            </settings>
+        </column>
+        <column name="order_grand_total" class="Acme\SellerRefund\Ui\Component\Listing\Column\Money" sortOrder="90">
+            <settings>
+                <label translate="true">Order Total</label>
+            </settings>
+        </column>
+        <column name="grand_total" class="Acme\SellerRefund\Ui\Component\Listing\Column\Money" sortOrder="100">
+            <settings>
+                <filter>textRange</filter>
+                <label translate="true">Refund Total</label>
+            </settings>
+        </column>
+        <column name="created_at" class="Magento\Ui\Component\Listing\Columns\Date"
+                component="Magento_Ui/js/grid/columns/date" sortOrder="110">
+            <settings>
+                <filter>dateRange</filter>
+                <dataType>date</dataType>
+                <label translate="true">Created At</label>
+            </settings>
+        </column>
+        <actionsColumn name="actions" class="Acme\SellerRefund\Ui\Component\Listing\Column\RefundActions"
+                       sortOrder="200">
+            <settings>
+                <indexField>entity_id</indexField>
+            </settings>
+        </actionsColumn>
+    </columns>
+</listing>
