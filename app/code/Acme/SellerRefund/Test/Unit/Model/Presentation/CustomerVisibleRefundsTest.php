@@ -7,6 +7,7 @@ namespace Acme\SellerRefund\Test\Unit\Model\Presentation;
 use Acme\SellerRefund\Api\Data\RefundInterface;
 use Acme\SellerRefund\Api\RefundRepositoryInterface;
 use Acme\SellerRefund\Model\Presentation\CustomerVisibleRefunds;
+use Acme\SellerRefund\Model\ResourceModel\Refund\CollectionFactory as RefundCollectionFactory;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -40,7 +41,10 @@ class CustomerVisibleRefundsTest extends TestCase
         $repository = $this->createMock(RefundRepositoryInterface::class);
         $repository->method('getByOrderId')->with(9)->willReturn($refunds);
 
-        $visible = (new CustomerVisibleRefunds($repository))->forOrder(9);
+        $visible = (new CustomerVisibleRefunds(
+            $repository,
+            $this->createMock(RefundCollectionFactory::class)
+        ))->forOrder(9);
 
         self::assertSame(
             [

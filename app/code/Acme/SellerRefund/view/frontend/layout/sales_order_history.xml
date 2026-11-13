@@ -1,15 +1,17 @@
 <?xml version="1.0"?>
+<!--
+/**
+ * My Orders: a "Refunded Orders" table below the orders table (FRD 10.4), with its own pager.
+ */
+-->
 <page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
     <body>
         <referenceContainer name="content">
-            <block class="Magento\Framework\View\Element\Template"
+            <block class="Acme\SellerRefund\Block\Order\RefundHistory"
                    name="acme.seller.refund.order.history"
-                   template="Acme_SellerRefund::order/history-refunds.phtml"
-                   after="customer.account.link.back">
-                <arguments>
-                    <argument name="refunds_view_model" xsi:type="object">Acme\SellerRefund\ViewModel\OrderHistoryRefunds</argument>
-                </arguments>
-            </block>
+                   template="Acme_SellerRefund::order/refund-history.phtml"
+                   after="sales.order.history"
+                   cacheable="false"/>
         </referenceContainer>
     </body>
 </page>

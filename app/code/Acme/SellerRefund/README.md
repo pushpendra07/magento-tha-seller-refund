@@ -160,13 +160,20 @@ details beyond the transaction reference, and personal data redacted (FRD 12.2).
 
 ## Storefront
 
-Customers see their refunds in two places, built from the stored refund snapshot (FRD 10.4):
+Customers see their refunds in two places, built from the stored refund snapshot (FRD 10.4),
+added through Magento's own layout, blocks and pager:
 
-- **Order details** (`sales_order_view`): for each refund, the partial-refund label, the
-  pre-refund total and a separate refund section (refund date, product subtotal, shipping,
-  ex-tax amount, consumption tax, total).
-- **My Orders** (`sales_order_history`): a "Refunded Orders" list showing each refund, its total
-  and the refunded items, newest order first like the My Orders list above it.
+- **My Orders** (`sales_order_history`): a "Refunded Orders" table below the orders table, in
+  Magento's order-table style: refund number, order number, refund date, type, refunded items,
+  refund total and a link to the order's Seller Refunds tab. Newest first, with Magento's pager
+  on its own URL parameters (`rp`, `rlimit`), so it pages independently of the orders table.
+  Each page costs three queries (count, the page, the refunded SKUs).
+- **Order view**: a "Seller Refunds" tab beside Items Ordered / Invoices / Order Shipments,
+  shown only when the order has a visible refund (`sellerrefund/order/view`). It is built like
+  Magento's own Refunds tab: the core order loader admits only the signed-in customer's own
+  order and the core login plugin applies. Each refund shows the partial-refund label and
+  refund date, the pre-refund total, the refunded lines, and the refund breakdown (subtotal,
+  shipping, ex-tax amount, consumption tax, total).
 
 Draft, failed and cancelled refunds are not shown, because no money will be paid for them
 (`Model/Presentation/CustomerVisibleRefunds`).

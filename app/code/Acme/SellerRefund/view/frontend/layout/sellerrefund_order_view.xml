@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Seller Refunds tab of a customer's order, built like Magento's sales_order_creditmemo page.
+ */
+-->
+<page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
+    <update handle="customer_account"/>
+    <update handle="sales_order_info_links"/>
+    <body>
+        <referenceContainer name="page.main.title">
+            <block class="Magento\Sales\Block\Order\Info"
+                   name="order.status"
+                   template="Magento_Sales::order/order_status.phtml"/>
+            <block class="Magento\Sales\Block\Order\Info"
+                   name="order.date"
+                   template="Magento_Sales::order/order_date.phtml"/>
+        </referenceContainer>
+        <referenceContainer name="content">
+            <block class="Acme\SellerRefund\Block\Order\RefundDetails"
+                   name="acme.seller.refund.order.details"
+                   template="Acme_SellerRefund::order/refund-details.phtml"
+                   after="sales.order.info.links"
+                   cacheable="false"/>
+        </referenceContainer>
+    </body>
+</page>
