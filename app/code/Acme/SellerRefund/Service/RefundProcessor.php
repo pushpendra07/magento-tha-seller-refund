@@ -206,7 +206,7 @@ class RefundProcessor
             $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_CREATE, RefundInterface::SUB_RETRYABLE_ERROR, [
                 'api_code' => 'create',
                 'attempt_no' => $attemptNo,
-                'error_code' => (string) $e->getHttpCode(),
+                'error_code' => $e->getErrorCode(),
             ]);
             throw $e;
         } catch (ErpBusinessException $e) {
@@ -327,7 +327,7 @@ class RefundProcessor
             $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_STATUS, RefundInterface::SUB_RETRYABLE_ERROR, [
                 'api_code' => 'status',
                 'attempt_no' => $attemptNo,
-                'error_code' => (string) $e->getHttpCode(),
+                'error_code' => $e->getErrorCode(),
             ]);
             throw $e;
         }
@@ -403,7 +403,7 @@ class RefundProcessor
             $this->eventRecorder->record($refundId, RefundEventInterface::TYPE_ERP_CONFIRM, RefundInterface::SUB_RETRYABLE_ERROR, [
                 'api_code' => 'confirm',
                 'attempt_no' => $attemptNo,
-                'error_code' => (string) $e->getHttpCode(),
+                'error_code' => $e->getErrorCode(),
             ]);
             throw $e;
         }

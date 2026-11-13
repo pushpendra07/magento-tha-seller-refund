@@ -7,6 +7,7 @@ namespace Acme\SellerRefund\Model\Erp;
 use Acme\SellerRefund\Model\Config;
 use Acme\SellerRefund\Model\Erp\Exception\ErpBusinessException;
 use Acme\SellerRefund\Model\Erp\Exception\ErpConflictException;
+use Acme\SellerRefund\Model\Erp\Exception\ErpInvalidResponseException;
 use Acme\SellerRefund\Model\Erp\Exception\ErpTransientException;
 use Acme\SellerRefund\Model\ResourceModel\Refund as RefundResource;
 use Magento\Framework\HTTP\Client\Curl;
@@ -19,6 +20,10 @@ use Magento\Framework\HTTP\Client\CurlFactory;
 class ErpRefundClient
 {
     private const CREATE_PATH = '/erp-api/v1/refunds';
+
+    private const STATUS_PENDING = 'refund-pending';
+
+    private const STATUS_CONFIRMED = 'refund-confirmed';
 
     public function __construct(
         private readonly CurlFactory $curlFactory,
@@ -41,11 +46,10 @@ class ErpRefundClient
         $this->classify($curl, false);
 
         $body = $this->decode($curl->getBody());
+        $erpId = (string) ($body['erp_refund_id'] ?? '');
+        $this->assertSuccessBody('Create Refund', $curl, $erpId !== '', $body, self::STATUS_PENDING);
 
-        return new CreateResult(
-            (string) ($body['erp_refund_id'] ?? ''),
-            (string) ($body['status'] ?? '')
-        );
+        return new CreateResult($erpId, (string) $body['status']);
     }
 
     /**
@@ -64,7 +68,18 @@ class ErpRefundClient
 
         $this->classify($curl, true);
 
-        return $this->decode($curl->getBody());
+        // The status itself is judged by the caller (read-before-confirm); here only the
+        // identity of the credit note is checked.
+        $body = $this->decode($curl->getBody());
+        $this->assertSuccessBody(
+            'Read Refund Status',
+            $curl,
+            (string) ($body['erp_refund_id'] ?? '') === $erpId,
+            $body,
+            null
+        );
+
+        return $body;
     }
 
     /**
@@ -80,7 +95,16 @@ class ErpRefundClient
         $this->send($curl, $uri, $payload);
         $this->classify($curl, false);
 
-        return $this->decode($curl->getBody());
+        $body = $this->decode($curl->getBody());
+        $this->assertSuccessBody(
+            'Confirm Refund',
+            $curl,
+            (string) ($body['erp_refund_id'] ?? '') === $erpId,
+            $body,
+            self::STATUS_CONFIRMED
+        );
+
+        return $body;
     }
 
     /**
@@ -139,6 +163,43 @@ class ErpRefundClient
         throw new ErpBusinessException(
             sprintf('The ERP rejected the refund (HTTP %d).', $status),
             (string) ($body['error_code'] ?? '')
+        );
+    }
+
+    /**
+     * Accept a 2xx only when its body is the documented response for the operation.
+     *
+     * Otherwise local state must not advance (FRD 9).
+     *
+     * @param string $operation
+     * @param Curl $curl
+     * @param bool $idMatches
+     * @param array $body
+     * @param string|null $expectedStatus
+     * @return void
+     * @throws ErpInvalidResponseException
+     */
+    private function assertSuccessBody(
+        string $operation,
+        Curl $curl,
+        bool $idMatches,
+        array $body,
+        ?string $expectedStatus
+    ): void {
+        $statusMatches = $expectedStatus === null
+            ? (string) ($body['status'] ?? '') !== ''
+            : ($body['status'] ?? null) === $expectedStatus;
+        if ($idMatches && $statusMatches) {
+            return;
+        }
+
+        throw new ErpInvalidResponseException(
+            sprintf(
+                'The ERP answered %s with HTTP %d but not with the expected credit note and status.',
+                $operation,
+                $curl->getStatus()
+            ),
+            $curl->getStatus()
         );
     }
 
