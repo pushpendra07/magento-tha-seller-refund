@@ -89,9 +89,11 @@ define([
                 return;
             }
 
+            // The question can contain operator input (the bank transaction number), and the dialog
+            // renders content as HTML, so it is passed as escaped text.
             confirm({
                 title: $t('Confirm'),
-                content: question,
+                content: $('<div>').text(question).html(),
                 actions: {
                     confirm: function () {
                         self._post(url, data);
