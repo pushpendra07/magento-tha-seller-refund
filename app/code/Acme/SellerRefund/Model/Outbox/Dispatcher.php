@@ -25,7 +25,15 @@ class Dispatcher
     ) {
     }
 
-    public function run(?string $op, int $limit): int
+    /**
+     * Claim and process due jobs; with $refundId, only that refund's jobs.
+     *
+     * @param string|null $op
+     * @param int $limit
+     * @param int|null $refundId
+     * @return int number of jobs processed
+     */
+    public function run(?string $op, int $limit, ?int $refundId = null): int
     {
         $operations = $op !== null
             ? [$op]
@@ -33,7 +41,7 @@ class Dispatcher
 
         $processed = 0;
         foreach ($operations as $operation) {
-            foreach ($this->outbox->claim($operation, $limit) as $row) {
+            foreach ($this->outbox->claim($operation, $limit, $refundId) as $row) {
                 $this->handle($operation, $row);
                 $processed++;
             }
@@ -58,10 +66,10 @@ class Dispatcher
                     $this->processor->process($refundId, $nextAttempt);
                     break;
                 case Outbox::OP_STATUS_CHECK:
-                    $this->processor->checkStatus($refundId);
+                    $this->processor->checkStatus($refundId, $nextAttempt);
                     break;
                 case Outbox::OP_CONFIRM:
-                    $this->processor->confirm($refundId);
+                    $this->processor->confirm($refundId, $nextAttempt);
                     break;
                 default:
                     throw new \InvalidArgumentException(sprintf('Unknown outbox operation "%s".', $op));
@@ -71,6 +79,7 @@ class Dispatcher
             $this->outbox->fail($id, $e->getMessage());
             if ($nextAttempt >= $this->config->maxAttempts()) {
                 $this->outbox->dead($id);
+                $this->markRetriesExhausted($refundId, $op, $nextAttempt);
                 return;
             }
             $this->outbox->reschedule($id, $this->backoffPolicy->delaySeconds($nextAttempt, $e->getRetryAfter()));
@@ -79,6 +88,30 @@ class Dispatcher
             $this->outbox->dead($id);
             $this->logger->error(
                 'Refund outbox job failed: ' . $e->getMessage(),
+                ['refund_id' => $refundId, 'operation' => $op]
+            );
+        }
+    }
+
+    /**
+     * Show on the refund that the outbox stopped retrying this call.
+     *
+     * Without this the sub-status stays "Retrying" although nothing will retry it until an
+     * operator replays it (FRD 14: the UI shows the real state). A failure here is logged; the
+     * job is already dead-lettered either way.
+     *
+     * @param int $refundId
+     * @param string $op
+     * @param int $attemptNo
+     * @return void
+     */
+    private function markRetriesExhausted(int $refundId, string $op, int $attemptNo): void
+    {
+        try {
+            $this->processor->markRetriesExhausted($refundId, $op, $attemptNo);
+        } catch (\Throwable $e) {
+            $this->logger->error(
+                'Marking exhausted refund retries failed: ' . $e->getMessage(),
                 ['refund_id' => $refundId, 'operation' => $op]
             );
         }

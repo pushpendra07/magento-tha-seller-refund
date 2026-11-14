@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * "Seller Refunds" tab beside Items Ordered / Invoices / Order Shipments / Refunds.
+ */
+-->
+<page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
+    <body>
+        <referenceBlock name="sales.order.info.links">
+            <block class="Acme\SellerRefund\Block\Order\Info\SellerRefundsLink"
+                   name="acme.seller.refund.order.info.link">
+                <arguments>
+                    <argument name="path" xsi:type="string">sellerrefund/order/view</argument>
+                    <argument name="label" xsi:type="string" translate="true">Seller Refunds</argument>
+                </arguments>
+            </block>
+        </referenceBlock>
+    </body>
+</page>

@@ -41,12 +41,14 @@ class PayloadRedactor
     {
         $result = [];
         foreach ($payload as $key => $value) {
-            if (is_array($value)) {
-                $result[$key] = $this->redact($value);
+            // A sensitive key is redacted whole, even when its value is a nested structure whose own
+            // keys look harmless; only non-sensitive branches are walked further.
+            if ($this->isSensitive((string) $key)) {
+                $result[$key] = self::REDACTED;
                 continue;
             }
 
-            $result[$key] = $this->isSensitive((string) $key) ? self::REDACTED : $value;
+            $result[$key] = is_array($value) ? $this->redact($value) : $value;
         }
 
         return $result;

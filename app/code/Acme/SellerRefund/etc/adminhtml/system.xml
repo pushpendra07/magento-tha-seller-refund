@@ -9,13 +9,56 @@
             <label>Seller Refund</label>
             <tab>acme_seller_refund</tab>
             <resource>Acme_SellerRefund::view</resource>
+            <group id="general" translate="label" sortOrder="10" showInDefault="1" showInWebsite="1" showInStore="1">
+                <label>General</label>
+                <field id="window_days" translate="label comment" type="text" sortOrder="10" showInDefault="1" showInWebsite="1" showInStore="1" canRestore="1">
+                    <label>Refund Window (Days)</label>
+                    <comment>Days after delivery during which a seller refund can be submitted.</comment>
+                    <validate>required-entry validate-digits validate-greater-than-zero</validate>
+                </field>
+            </group>
             <group id="erp" translate="label" sortOrder="20" showInDefault="1" showInWebsite="0" showInStore="0">
                 <label>ERP Refund API</label>
-                <field id="base_url" translate="label" type="text" sortOrder="10" showInDefault="1" showInWebsite="0" showInStore="0">
+                <field id="base_url" translate="label comment" type="text" sortOrder="10" showInDefault="1" showInWebsite="0" showInStore="0" canRestore="1">
                     <label>Base URL</label>
+                    <comment>For example http://erp-refund-stub:8081 (no trailing slash needed).</comment>
+                    <validate>required-entry</validate>
                 </field>
-                <field id="max_attempts" translate="label" type="text" sortOrder="20" showInDefault="1" showInWebsite="0" showInStore="0">
+                <field id="connect_timeout" translate="label comment" type="text" sortOrder="20" showInDefault="1" showInWebsite="0" showInStore="0" canRestore="1">
+                    <label>Connect Timeout (Seconds)</label>
+                    <comment>How long to wait for the ERP connection to open.</comment>
+                    <validate>required-entry validate-digits validate-greater-than-zero</validate>
+                </field>
+                <field id="timeout" translate="label comment" type="text" sortOrder="30" showInDefault="1" showInWebsite="0" showInStore="0" canRestore="1">
+                    <label>Response Timeout (Seconds)</label>
+                    <comment>How long to wait for the ERP response before the attempt is retried.</comment>
+                    <validate>required-entry validate-digits validate-greater-than-zero</validate>
+                </field>
+                <field id="max_attempts" translate="label comment" type="text" sortOrder="40" showInDefault="1" showInWebsite="0" showInStore="0" canRestore="1">
                     <label>Max Attempts</label>
+                    <comment>Attempts per ERP call before the outbox job is marked dead.</comment>
+                    <validate>required-entry validate-digits validate-greater-than-zero</validate>
+                </field>
+                <field id="backoff_base_seconds" translate="label comment" type="text" sortOrder="50" showInDefault="1" showInWebsite="0" showInStore="0" canRestore="1">
+                    <label>Retry Backoff Base (Seconds)</label>
+                    <comment>Retry delay is this value raised to the attempt number (5 gives 5, 25, 125 seconds), up to the cap.</comment>
+                    <validate>required-entry validate-digits validate-greater-than-zero</validate>
+                </field>
+                <field id="backoff_cap_seconds" translate="label comment" type="text" sortOrder="60" showInDefault="1" showInWebsite="0" showInStore="0" canRestore="1">
+                    <label>Retry Backoff Cap (Seconds)</label>
+                    <comment>Longest delay between retries.</comment>
+                    <validate>required-entry validate-digits validate-greater-than-zero</validate>
+                </field>
+            </group>
+            <group id="email" translate="label" sortOrder="30" showInDefault="1" showInWebsite="1" showInStore="1">
+                <label>Refund Confirmation Email</label>
+                <field id="confirmation_template" translate="label" type="select" sortOrder="10" showInDefault="1" showInWebsite="1" showInStore="1" canRestore="1">
+                    <label>Email Template</label>
+                    <source_model>Magento\Config\Model\Config\Source\Email\Template</source_model>
+                </field>
+                <field id="confirmation_identity" translate="label" type="select" sortOrder="20" showInDefault="1" showInWebsite="1" showInStore="1" canRestore="1">
+                    <label>Email Sender</label>
+                    <source_model>Magento\Config\Model\Config\Source\Email\Identity</source_model>
                 </field>
             </group>
         </section>

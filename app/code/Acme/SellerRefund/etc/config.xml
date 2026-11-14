@@ -14,7 +14,7 @@
                 <backoff_cap_seconds>300</backoff_cap_seconds>
             </erp>
             <email>
-                <confirmation_template>acme_seller_refund_confirmed_template</confirmation_template>
+                <confirmation_template>acme_seller_refund_email_confirmation_template</confirmation_template>
                 <confirmation_identity>general</confirmation_identity>
             </email>
         </acme_seller_refund>

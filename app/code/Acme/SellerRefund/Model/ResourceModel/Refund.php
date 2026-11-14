@@ -16,6 +16,22 @@ class Refund extends AbstractDb
     }
 
     /**
+     * Find a persisted browser intention using the unique submission-token index.
+     *
+     * @param string $token
+     * @return array|null
+     */
+    public function findSubmission(string $token): ?array
+    {
+        $row = $this->getConnection()->fetchRow(
+            $this->getConnection()->select()->from($this->getMainTable())
+                ->where('submission_token = ?', $token)->limit(1)
+        );
+
+        return $row ?: null;
+    }
+
+    /**
      * Optimistic compare-and-set. Bumps version by one only when the stored version still
      * matches the expected value. Returns true when exactly one row was updated.
      *

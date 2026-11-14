@@ -70,6 +70,41 @@ class RefundStateMachineTest extends TestCase
         $this->stateMachine->transition($refund, RefundInterface::STATUS_ERP_CONFIRMED);
     }
 
+    /**
+     * BR-09: cancellation is possible only before any Create Refund attempt, because once the
+     * ERP may hold a credit note there is no way to void it.
+     *
+     * @dataProvider cancelProvider
+     */
+    public function testCanCancelOnlyBeforeAnyCreateAttempt(string $status, string $createStatus, bool $expected): void
+    {
+        $refund = $this->refund($status, 1);
+        $refund->method('getCreateStatus')->willReturn($createStatus);
+
+        self::assertSame($expected, $this->stateMachine->canCancel($refund));
+    }
+
+    /**
+     * @return array<string, array{string, string, bool}>
+     */
+    public static function cancelProvider(): array
+    {
+        return [
+            'calculated, create not started' => [
+                RefundInterface::STATUS_CALCULATED, RefundInterface::SUB_NOT_STARTED, true,
+            ],
+            'calculated, create timed out (ERP may hold it)' => [
+                RefundInterface::STATUS_CALCULATED, RefundInterface::SUB_RETRYABLE_ERROR, false,
+            ],
+            'credit note open in ERP' => [
+                RefundInterface::STATUS_CASH_REFUND_PENDING, RefundInterface::SUB_SUCCEEDED, false,
+            ],
+            'cash refunded' => [
+                RefundInterface::STATUS_CASH_REFUNDED, RefundInterface::SUB_SUCCEEDED, false,
+            ],
+        ];
+    }
+
     private function refund(string $status, int $version): Refund&MockObject
     {
         $refund = $this->createMock(Refund::class);

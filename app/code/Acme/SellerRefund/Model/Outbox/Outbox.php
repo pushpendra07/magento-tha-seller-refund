@@ -49,9 +49,14 @@ class Outbox
     }
 
     /**
+     * Lease up to $limit due jobs for one operation, optionally for one refund only.
+     *
+     * @param string $op
+     * @param int $limit
+     * @param int|null $refundId restrict the claim to this refund's jobs
      * @return array<int, array<string, mixed>>
      */
-    public function claim(string $op, int $limit): array
+    public function claim(string $op, int $limit, ?int $refundId = null): array
     {
         $connection = $this->connection();
         $table = $this->table();
@@ -62,8 +67,11 @@ class Outbox
                 ->from($table, ['entity_id'])
                 ->where('state = ?', self::STATE_PENDING)
                 ->where('operation = ?', $op)
-                ->where('available_at <= NOW()')
-                ->order('available_at ' . \Magento\Framework\DB\Select::SQL_ASC)
+                ->where('available_at <= NOW()');
+            if ($refundId !== null) {
+                $select->where('refund_id = ?', $refundId);
+            }
+            $select->order('available_at ' . \Magento\Framework\DB\Select::SQL_ASC)
                 ->limit($limit)
                 ->forUpdate(true);
 
@@ -146,6 +154,26 @@ class Outbox
                 'state = ?' => self::STATE_PENDING,
             ]
         );
+    }
+
+    /**
+     * Whether a job for this refund and operation was dead-lettered and awaits operator replay.
+     *
+     * @param int $refundId
+     * @param string $op
+     * @return bool
+     */
+    public function hasDead(int $refundId, string $op): bool
+    {
+        $connection = $this->connection();
+        $select = $connection->select()
+            ->from($this->table(), ['entity_id'])
+            ->where('refund_id = ?', $refundId)
+            ->where('operation = ?', $op)
+            ->where('state = ?', self::STATE_DEAD)
+            ->limit(1);
+
+        return (bool) $connection->fetchOne($select);
     }
 
     public function hasPending(int $refundId): bool

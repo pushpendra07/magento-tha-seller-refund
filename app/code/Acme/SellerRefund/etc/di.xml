@@ -15,4 +15,19 @@
             </argument>
         </arguments>
     </type>
+
+    <!-- Seller Refunds admin grid data source (view/adminhtml/ui_component/acme_refund_listing.xml). -->
+    <type name="Magento\Framework\View\Element\UiComponent\DataProvider\CollectionFactory">
+        <arguments>
+            <argument name="collections" xsi:type="array">
+                <item name="acme_refund_listing_data_source" xsi:type="string">Acme\SellerRefund\Model\ResourceModel\Refund\Grid\Collection</item>
+            </argument>
+        </arguments>
+    </type>
+    <type name="Acme\SellerRefund\Model\ResourceModel\Refund\Grid\Collection">
+        <arguments>
+            <argument name="mainTable" xsi:type="string">mp_refund</argument>
+            <argument name="resourceModel" xsi:type="string">Acme\SellerRefund\Model\ResourceModel\Refund</argument>
+        </arguments>
+    </type>
 </config>

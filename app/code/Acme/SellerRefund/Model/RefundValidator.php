@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Acme\SellerRefund\Model;
 
 use Acme\SellerRefund\Exception\ValidationException;
+use Acme\SellerRefund\Model\Source\RefundReason;
 use Acme\SellerRefund\Model\Submission\RefundSubmission;
 use Magento\Sales\Api\Data\OrderInterface;
 
@@ -14,13 +15,7 @@ use Magento\Sales\Api\Data\OrderInterface;
  */
 class RefundValidator
 {
-    public const ALLOWED_REASONS = [
-        'defect',
-        'shortage',
-        'customer_return',
-        'price_adjustment',
-        'other',
-    ];
+    public const ALLOWED_REASONS = RefundReason::CODES;
 
     public function __construct(
         private readonly SellerLineResolver $sellerLineResolver
@@ -48,6 +43,14 @@ class RefundValidator
             if (!isset($sellerLines[$orderItemId])) {
                 throw new ValidationException(
                     __('Order item %1 is not a refundable seller line.', $orderItemId)
+                );
+            }
+
+            // Seller lines are refunded in whole units; a fraction would reach the ERP as quantity 0
+            // with a non-zero amount. Checked before any arithmetic, so text is rejected cleanly.
+            if (!preg_match('/^-?\d+(\.0+)?$/', $qty)) {
+                throw new ValidationException(
+                    __('The refund quantity for order item %1 must be a whole number.', $orderItemId)
                 );
             }
 

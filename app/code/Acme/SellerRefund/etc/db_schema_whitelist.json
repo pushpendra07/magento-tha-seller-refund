@@ -24,7 +24,9 @@
             "created_at": true,
             "created_by": true,
             "updated_at": true,
-            "updated_by": true
+            "updated_by": true,
+            "submission_token": true,
+            "submission_fingerprint": true
         },
         "index": {
             "MP_REFUND_STATUS_CREATED_AT": true,
@@ -33,7 +35,8 @@
         "constraint": {
             "PRIMARY": true,
             "MP_REFUND_REFUND_NO": true,
-            "MP_REFUND_ORDER_ID_SALES_ORDER_ENTITY_ID": true
+            "MP_REFUND_ORDER_ID_SALES_ORDER_ENTITY_ID": true,
+            "MP_REFUND_SUBMISSION_TOKEN": true
         }
     },
     "mp_refund_item": {
@@ -103,7 +106,8 @@
             "updated_at": true
         },
         "index": {
-            "MP_REFUND_OUTBOX_STATE_AVAILABLE_AT": true
+            "MP_REFUND_OUTBOX_STATE_AVAILABLE_AT": true,
+            "MP_REFUND_OUTBOX_REFUND_ID_OPERATION_STATE": true
         },
         "constraint": {
             "PRIMARY": true,

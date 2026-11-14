@@ -9,6 +9,51 @@ with your assignment before starting (see Quick start). Begin with the assignmen
 itself in
 [`docs/candidate/candidate-brief.md`](docs/candidate/candidate-brief.md).
 
+## Submission
+
+Written work is in [`submission/`](submission/): code review (01), refund design (02),
+architecture review (03), build impact note (04), AI usage (05), and questions and next
+steps (06). Two PDFs go with them: the change report with before-and-after screenshots
+([`07-change-report.pdf`](submission/07-change-report.pdf)) and the business flow and
+architecture proposal
+([`seller-refund-architecture-review.pdf`](submission/seller-refund-architecture-review.pdf),
+referenced from 03).
+
+`main` is unchanged: it is the baseline the two review pull requests are compared against.
+All work is on the branches below.
+
+**Part 3 fix** (over-refund guard on PR 2, finding 1 in `01`): commit
+[`c1343a7`](https://github.com/pushpendra07/magento-tha-seller-refund/commit/c1343a7be2e37cd95d8321b2e9658775506420ee)
+on branch `fix/pr-02-over-refund-guard`, opened as PR #3 into
+`review/pr-02-erp-refund-sync`. Test command:
+
+```bash
+git checkout fix/pr-02-over-refund-guard
+bin/assignment-cache-flush --all
+bin/assignment-test all
+```
+
+**Further work, beyond Part 3** (each branch has its own tests):
+
+| Branch | Based on | Contents |
+| --- | --- | --- |
+| `fix/pr-02-review-fixes` | `fix/pr-02-over-refund-guard` | PR 2 findings 2, 3, 4, 5, 10 and 11 from `01` |
+| `fix/pr-01-review-fixes` | `review/pr-01-partial-refund-presentation` | PR 1 findings 6, 7, 8 and 9, and the standards finding |
+| `fix/main-issues-e2e` | `main` | Issues 1-41 found on `main` while using and reviewing the running module (listed in `06`), plus improvements to the admin and storefront refund pages |
+| `submission` | `fix/pr-02-review-fixes` | Everything together: merges `fix/pr-01-review-fixes` and `fix/main-issues-e2e`, then adds issues 42-43 from `06` (submission token, ERP outcome after Save), stricter ERP credit-note ids and an ID column on the refund grid. This is the branch to run to see the finished module. |
+
+Test command for any of them (replace the branch name):
+
+```bash
+git checkout submission
+bin/assignment-cache-flush --all
+bin/assignment-test all
+node --test app/code/Acme/SellerRefund/Test/JavaScript/refund-form.test.cjs   # submission only; Node 18+
+```
+
+The integration suite needs unrefunded quantity on the seed orders; run it on a freshly
+seeded stack (`bin/reset-assignment --yes`).
+
 ## Prerequisites
 
 - Docker Desktop (or a Docker engine) with Compose v2;
