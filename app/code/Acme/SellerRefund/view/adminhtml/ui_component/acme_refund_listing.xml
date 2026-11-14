@@ -44,6 +44,13 @@
         <paging name="listing_paging"/>
     </listingToolbar>
     <columns name="acme_refund_columns">
+
+        <column name="entity_id" sortOrder="05">
+            <settings>
+                <filter>text</filter>
+                <label translate="true">Entity Id</label>
+            </settings>
+        </column>
         <column name="refund_no" sortOrder="10">
             <settings>
                 <filter>text</filter>
