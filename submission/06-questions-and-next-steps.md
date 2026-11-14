@@ -87,7 +87,7 @@ Not introduced by either PR, so outside the Part 1 ranking. Issues 1–31 were f
 
 Issues 8–14 and 16 each have a test that fails on the original code and passes with the fix (`OutboxRecoveryTest`, `EligibilityEnforcedTest`, and cases in `RefundProcessorTest` and `RefundTotalCalculatorTest`). Issues 12–15 came from a second review pass of the module, verified against the code before fixing. Issues 32–43 came from the final review; each finding was checked against the code first, and each fix has its own commit and test. Issues 16–17 came from placing a real storefront order and opening it in the refund form.
 
-**Change report.** [`07-change-report.pdf`](07-change-report.pdf) shows issues 1–31 with before-and-after screenshots, the PR fixes, and issues 32–40 (numbered N01–N09 there), with the evidence behind each one. It was produced at `1e32a30`, so it lists submission deduplication and strict Create id checks as still open; those are now fixed as issues 42 and 37, and issues 41–43 appear only in this table.
+**Change report.** [`07-change-report.pdf`](07-change-report.pdf) is updated on 14 November 2026 against `submission` at `10baf6b`. It covers issues 1–43 using this table's numbering, the PR fixes and their commits, and separates historical screenshots/results from fresh browser and receipt-layout captures. Receipt pagination (41), persistent submission deduplication (42), strict Create id checks (37, including `0b98ff7`) and Save outcome messages (43) are recorded as implemented. The full PHP, integration, smoke and JavaScript suites were not rerun for this report-only update; earlier counts are labelled historical, with current verification still pending.
 
 ### End-to-end run (local stack, ERP stub)
 
