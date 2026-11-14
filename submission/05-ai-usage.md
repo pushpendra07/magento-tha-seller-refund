@@ -2,18 +2,18 @@
 
 ## Summary
 
-Two parties did this work: me and **Claude Code** (Anthropic), an AI coding agent running in my terminal with access to the repository and the Docker stack.
+Three parties did this work: me, **Claude Code** (Anthropic) and **Codex** (OpenAI). Both are AI coding agents that ran in my terminal with access to the repository and the Docker stack. Claude Code did most of the work; Codex reviewed the module independently and then took over part of the final fixes and the change report.
 
-I owned the direction. I defined the path through the assignment (what to do, in what order, on which branch), the role Claude Code played at each step, the rules it worked under, and what counted as done. Claude Code did most of the reading, reproducing, drafting, coding and test-running inside that frame. I checked its claims against the running stack, corrected it where it was wrong, and approved every commit and push. I can explain and defend everything submitted.
+I owned the direction. I defined the path through the assignment (what to do, in what order, on which branch), the role Claude Code played at each step, the rules it worked under, and what counted as done. The agents did most of the reading, reproducing, drafting, coding and test-running inside that frame. I checked its claims against the running stack, corrected it where it was wrong, and approved every commit and push. I can explain and defend everything submitted.
 
 ## Who did what
 
-| | Me | Claude Code |
-| --- | --- | --- |
-| Role | Owner and decision-maker: path, scope, branch layout, priorities, acceptance | Engineer working to my instructions: investigate, reproduce, implement, test, draft |
-| Decides | Which defect Part 3 fixes, what is a bug versus an improvement, what waits for the client, what goes on which branch, when something is finished | Nothing on its own; proposes, then waits for my answer |
-| Writes | Rules, review comments on its output, corrections, approvals | Code, tests, reproduction scripts, document drafts |
-| Checks | Its findings against the code, the FRD and the browser; every diff before commit | Its own work with tests, phpcs and the browser before reporting to me |
+| | Me | Claude Code | Codex |
+| --- | --- | --- | --- |
+| Role | Owner and decision-maker: path, scope, branch layout, priorities, acceptance | Main engineer working to my instructions: investigate, reproduce, implement, test, draft | Independent reviewer of the module, then engineer for part of the final round |
+| Decides | Which defect Part 3 fixes, what is a bug versus an improvement, what waits for the client, what goes on which branch, when something is finished | Nothing on its own; proposes, then waits for my answer | Nothing on its own; worked under the same rules, from a written handover |
+| Writes | Rules, handovers, review comments on their output, corrections, approvals | Code, tests, reproduction scripts, document drafts | A module review; the submission token, stricter ERP ids, Save outcome messages and receipt PDF fixes; the integration merges; the change report PDF |
+| Checks | Their findings against the code, the FRD and the browser; every diff before commit | Its own work with tests, phpcs and the browser; Codex's review findings against the code | Its own work with tests and the browser |
 
 Claude Code reached the admin and storefront through its Chrome integration (`localhost:8080`, synthetic accounts from the README), reading console and network errors there.
 
@@ -49,7 +49,7 @@ Claude Code reached the admin and storefront through its Chrome integration (`lo
 | Part 3, fix | Wrote the tests first, showed them failing on PR 2, then wrote the fix | Approved the approach, the branch, the commit and the push (PR #3) |
 | Review fixes | Fixed the other PR findings on their own branches | Decided they stay off the Part 3 branch so Part 3 stays small |
 | Module end to end | Drove the admin and storefront and the full refund lifecycle against every stub failure mode; fixed each defect with a test | Asked for the end-to-end run, classified each finding as bug or improvement, and declined changes I did not want (for example failure notification emails) |
-| Final review round | Verified each finding against the code, then fixed the confirmed ones with tests | Brought the review, decided which findings to fix now and which go to next steps |
+| Final review round | Claude Code verified each Codex finding against the code and fixed most of them with tests; Codex fixed the rest (the submission token, stricter ERP ids, the Save outcome messages, the receipt PDF) and updated the change report | Asked Codex for an independent review, decided which findings to fix now and which go to next steps, and handed work between the two agents with written handovers |
 | Documents | Drafted all six files and the change report | Reviewed and corrected them against the brief, the templates and the setup email |
 
 ## How I checked the output
@@ -61,14 +61,16 @@ Claude Code reached the admin and storefront through its Chrome integration (`lo
 
 ## Where AI was wrong, and how it was caught
 
-1. **An early reading of PR 2 got the duplicate-credit-note path wrong.** It said an operator retry opens a second credit note. Reproduction showed an operator retry starts a new outbox job at attempt 1 and sends the original key; the real failure on that path is a crash on an illegal state transition. The duplicate is real only once transient errors are retried, which is why `01` calls finding 4 latent and ranks the over-refund first.
+1. **An early second-opinion reading of PR 2 got the duplicate-credit-note path wrong.** It said an operator retry opens a second credit note. Reproduction showed an operator retry starts a new outbox job at attempt 1 and sends the original key; the real failure on that path is a crash on an illegal state transition. The duplicate is real only once transient errors are retried, which is why `01` calls finding 4 latent and ranks the over-refund first.
 2. **Claude Code overstated `main`.** It first wrote that `main` quarantines an ERP 409 conflict. Reading the code showed `main` marks the refund `failed`, which releases the quantity. Corrected in `01` and `03`, and fixed as issue 9 in `06`.
 3. **Claude Code put the first additional fixes on `main`.** I questioned this against the setup instructions, which never ask for `main` to change. They were moved to `fix/main-issues-e2e` before anything was pushed, so the review PRs stay conflict-free.
 4. **Claude Code introduced a fatal error** by injecting a form key into a block whose parent already declares one. The browser check caught it within minutes.
 5. **Claude Code briefly broke the admin's JavaScript** while forcing a static-file refresh (a trailing newline in `deployed_version.txt`). Found from the console errors and fixed.
 6. **Claude Code edited the assignment's Docker tooling** to fix a cache-flush bug. That script is baked into the image, so the edit was reverted and the bug is documented in `06` instead.
 7. **The documents were first written without the submission templates.** After I pointed to the setup email, the headings were aligned with `docs/candidate/submission-template/`.
-8. **A second review pass of the module was only half right.** Four of its findings held up in the code and were fixed with tests (`06` issues 12–15). Others did not: it claimed ERP creation was not idempotent, which the ERP's `refund_no` deduplication and our stub test disprove, and it proposed native credit memos, which the FRD rules out of scope.
+8. **An earlier second review pass of the module was only half right.** Four of its findings held up in the code and were fixed with tests (`06` issues 12–15). Others did not: it claimed ERP creation was not idempotent, which the ERP's `refund_no` deduplication and our stub test disprove, and it proposed native credit memos, which the FRD rules out of scope.
+
+9. **A Codex merge dropped a file.** Merging the fix branches into `submission` deleted the module README. It was found while checking the docs against the branch and restored in a separate commit.
 
 ## What I would do differently
 
